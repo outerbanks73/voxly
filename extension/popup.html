@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpeakToText Local</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      width: 400px;
+      min-height: 300px;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .header p {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .status-bar {
+      padding: 8px 16px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-bar.connected {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-bar.disconnected {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .connected .status-dot {
+      background: #28a745;
+    }
+
+    .disconnected .status-dot {
+      background: #dc3545;
+    }
+
+    .tabs {
+      display: flex;
+      background: white;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: #666;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      background: #f0f0f0;
+    }
+
+    .tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .tab-content {
+      display: none;
+      padding: 16px;
+      background: white;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #444;
+    }
+
+    .file-input-wrapper {
+      position: relative;
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .file-input-wrapper:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+
+    .file-input-wrapper.has-file {
+      border-color: #28a745;
+      background: #f0fff4;
+    }
+
+    .file-input-wrapper input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .file-input-wrapper .icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .file-input-wrapper .text {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .file-input-wrapper .filename {
+      font-size: 13px;
+      color: #28a745;
+      font-weight: 500;
+    }
+
+    input[type="text"], select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus, select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-record {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-record.recording {
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .btn-stop {
+      background: #6c757d;
+      color: white;
+    }
+
+    .progress-section {
+      display: none;
+      padding: 16px;
+      background: white;
+      border-top: 1px solid #eee;
+    }
+
+    .progress-section.active {
+      display: block;
+    }
+
+    .progress-bar-container {
+      background: #e9ecef;
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    .progress-bar.indeterminate {
+      width: 30%;
+      animation: indeterminate 1.5s infinite linear;
+    }
+
+    @keyframes indeterminate {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+
+    .progress-text {
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }
+
+    .result-section {
+      display: none;
+      padding: 16px;
+      background: white;
+      border-top: 1px solid #eee;
+    }
+
+    .result-section.active {
+      display: block;
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .result-header h3 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .result-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .result-actions button {
+      padding: 6px 12px;
+      font-size: 12px;
+      border: 1px solid #ddd;
+      background: white;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .result-actions button:hover {
+      background: #f0f0f0;
+    }
+
+    .transcript-box {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+      padding: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .speaker-label {
+      font-weight: 600;
+      color: #667eea;
+    }
+
+    .timestamp {
+      color: #999;
+      font-size: 11px;
+    }
+
+    .settings-link {
+      display: block;
+      text-align: center;
+      padding: 12px;
+      font-size: 12px;
+      color: #666;
+      text-decoration: none;
+      border-top: 1px solid #eee;
+    }
+
+    .settings-link:hover {
+      color: #667eea;
+    }
+
+    .error-message {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .recording-indicator {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      background: #fff3cd;
+      color: #856404;
+      font-size: 13px;
+    }
+
+    .recording-indicator.active {
+      display: flex;
+    }
+
+    .recording-dot {
+      width: 12px;
+      height: 12px;
+      background: #dc3545;
+      border-radius: 50%;
+      animation: pulse 1s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>SpeakToText Local</h1>
+    <p>Private audio transcription</p>
+  </div>
+
+  <div id="statusBar" class="status-bar disconnected">
+    <div class="status-dot"></div>
+    <span id="statusText">Checking server connection...</span>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="file">File</div>
+    <div class="tab" data-tab="url">URL</div>
+    <div class="tab" data-tab="record">Record Tab</div>
+  </div>
+
+  <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+  <!-- File Upload Tab -->
+  <div id="tab-file" class="tab-content active">
+    <div class="form-group">
+      <label>Select Audio/Video File</label>
+      <div class="file-input-wrapper" id="fileDropZone">
+        <input type="file" id="fileInput" accept="audio/*,video/*,.m4a,.mp3,.wav,.flac,.ogg,.mp4,.webm,.mkv">
+        <div class="icon">📁</div>
+        <div class="text">Click or drag file here</div>
+        <div class="filename" id="fileName" style="display: none;"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Whisper Model</label>
+      <select id="modelSelect">
+        <option value="base">Base (recommended)</option>
+        <option value="tiny">Tiny (fastest)</option>
+        <option value="small">Small (better accuracy)</option>
+        <option value="medium">Medium (high accuracy)</option>
+        <option value="large">Large (best accuracy)</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="transcribeFileBtn" disabled>
+      Transcribe File
+    </button>
+  </div>
+
+  <!-- URL Tab -->
+  <div id="tab-url" class="tab-content">
+    <div class="form-group">
+      <label>Audio/Video URL</label>
+      <input type="text" id="urlInput" placeholder="YouTube, podcast, or direct audio URL">
+    </div>
+    <div class="form-group">
+      <label>Whisper Model</label>
+      <select id="modelSelectUrl">
+        <option value="base">Base (recommended)</option>
+        <option value="tiny">Tiny (fastest)</option>
+        <option value="small">Small (better accuracy)</option>
+        <option value="medium">Medium (high accuracy)</option>
+        <option value="large">Large (best accuracy)</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="transcribeUrlBtn">
+      Transcribe URL
+    </button>
+  </div>
+
+  <!-- Record Tab -->
+  <div id="tab-record" class="tab-content">
+    <p style="font-size: 13px; color: #666; margin-bottom: 16px;">
+      Record audio from the current browser tab. Click Start to begin recording, then Stop when finished.
+    </p>
+    <div class="recording-indicator" id="recordingIndicator">
+      <div class="recording-dot"></div>
+      <span>Recording... <span id="recordingTime">00:00</span></span>
+    </div>
+    <div class="form-group">
+      <label>Whisper Model</label>
+      <select id="modelSelectRecord">
+        <option value="base">Base (recommended)</option>
+        <option value="tiny">Tiny (fastest)</option>
+        <option value="small">Small (better accuracy)</option>
+        <option value="medium">Medium (high accuracy)</option>
+        <option value="large">Large (best accuracy)</option>
+      </select>
+    </div>
+    <button class="btn btn-record" id="startRecordBtn">
+      Start Recording
+    </button>
+    <button class="btn btn-stop" id="stopRecordBtn" style="display: none; margin-top: 8px;">
+      Stop Recording
+    </button>
+  </div>
+
+  <!-- Progress Section -->
+  <div id="progressSection" class="progress-section">
+    <div class="progress-bar-container">
+      <div class="progress-bar indeterminate" id="progressBar"></div>
+    </div>
+    <div class="progress-text" id="progressText">Starting...</div>
+  </div>
+
+  <!-- Result Section -->
+  <div id="resultSection" class="result-section">
+    <div class="result-header">
+      <h3>Transcript</h3>
+      <div class="result-actions">
+        <button id="copyBtn">Copy</button>
+        <button id="downloadBtn">Download</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+    </div>
+    <div class="transcript-box" id="transcriptBox"></div>
+  </div>
+
+  <a href="options.html" target="_blank" class="settings-link">
+    ⚙️ Settings (Hugging Face token for speaker identification)
+  </a>
+
+  <script src="popup.js"></script>
+</body>
+</html>
