@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Extension ZIP
+        run: |
+          cd extension
+          zip -r ../speaktotext-extension.zip .
+          cd ..
+
+      - name: Create Full Package ZIP
+        run: |
+          zip -r speaktotext-local-${{ github.ref_name }}.zip \
+            extension/ \
+            server/ \
+            install.sh \
+            install.bat \
+            start-server.sh \
+            README.md \
+            LICENSE
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            speaktotext-extension.zip
+            speaktotext-local-${{ github.ref_name }}.zip
+          body: |
+            ## SpeakToText Local ${{ github.ref_name }}
+
+            ### Downloads
+
+            | File | Description |
+            |------|-------------|
+            | `speaktotext-local-${{ github.ref_name }}.zip` | Full package (extension + server) |
+            | `speaktotext-extension.zip` | Chrome extension only |
+
+            ### Installation
+
+            1. Download `speaktotext-local-${{ github.ref_name }}.zip`
+            2. Extract and run `./install.sh` (macOS/Linux) or `install.bat` (Windows)
+            3. Load the extension in Chrome from the `extension` folder
+            4. Start the server with `./start-server.sh`
+
+            See [README](https://github.com/outerbanks73/speaktotext-local#readme) for detailed instructions.
+          generate_release_notes: true
