@@ -63,6 +63,10 @@ const STREAMING_SITES = [
   'audiomack.com'
 ];
 
+// Current extension version
+const CURRENT_VERSION = '1.2.0';
+const GITHUB_REPO = 'outerbanks73/speaktotext-local';
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await checkServerConnection();
@@ -70,6 +74,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupFileUpload();
   setupButtons();
   await autoPopulateUrlIfStreaming();
+  checkForUpdates();
 });
 
 // Check server connection
@@ -855,5 +860,79 @@ async function autoPopulateUrlIfStreaming() {
     }
   } catch (e) {
     // Silently fail if we can't get the tab URL
+  }
+}
+
+// Check for updates from GitHub
+async function checkForUpdates() {
+  try {
+    // Only check once per day
+    const lastCheck = localStorage.getItem('lastUpdateCheck');
+    const now = Date.now();
+    if (lastCheck && (now - parseInt(lastCheck)) < 24 * 60 * 60 * 1000) {
+      // Check if we already know about an update
+      const knownUpdate = localStorage.getItem('availableUpdate');
+      if (knownUpdate && compareVersions(knownUpdate, CURRENT_VERSION) > 0) {
+        showUpdateBanner(knownUpdate);
+      }
+      return;
+    }
+
+    // Fetch latest release from GitHub API
+    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github.v3+json' }
+    });
+
+    if (!response.ok) {
+      // Try fetching the manifest from main branch as fallback
+      const manifestResponse = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/main/extension/manifest.json`);
+      if (manifestResponse.ok) {
+        const manifest = await manifestResponse.json();
+        const latestVersion = manifest.version;
+        localStorage.setItem('lastUpdateCheck', now.toString());
+
+        if (compareVersions(latestVersion, CURRENT_VERSION) > 0) {
+          localStorage.setItem('availableUpdate', latestVersion);
+          showUpdateBanner(latestVersion);
+        }
+      }
+      return;
+    }
+
+    const release = await response.json();
+    const latestVersion = release.tag_name.replace(/^v/, '');
+    localStorage.setItem('lastUpdateCheck', now.toString());
+
+    if (compareVersions(latestVersion, CURRENT_VERSION) > 0) {
+      localStorage.setItem('availableUpdate', latestVersion);
+      showUpdateBanner(latestVersion);
+    }
+  } catch (e) {
+    // Silently fail - update check is non-critical
+    console.log('Update check failed:', e.message);
+  }
+}
+
+// Compare semantic versions (returns 1 if a > b, -1 if a < b, 0 if equal)
+function compareVersions(a, b) {
+  const partsA = a.split('.').map(Number);
+  const partsB = b.split('.').map(Number);
+
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const numA = partsA[i] || 0;
+    const numB = partsB[i] || 0;
+    if (numA > numB) return 1;
+    if (numA < numB) return -1;
+  }
+  return 0;
+}
+
+// Show update banner
+function showUpdateBanner(version) {
+  const banner = document.getElementById('updateBanner');
+  const text = document.getElementById('updateText');
+  if (banner && text) {
+    text.textContent = `v${version} available!`;
+    banner.style.display = 'block';
   }
 }

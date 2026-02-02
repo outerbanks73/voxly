@@ -418,6 +418,25 @@
       color: #667eea;
     }
 
+    .update-banner {
+      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+      color: white;
+      padding: 10px 16px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .update-banner a {
+      color: white;
+      font-weight: 600;
+      margin-left: 8px;
+      text-decoration: underline;
+    }
+
+    .update-banner a:hover {
+      opacity: 0.9;
+    }
+
     .error-message {
       background: #f8d7da;
       color: #721c24;
@@ -586,6 +605,11 @@
     </div>
     <div class="transcript-box" id="transcriptBox" spellcheck="false"></div>
     <div class="edit-notice" id="editNotice">✏️ Edit mode: Make changes directly in the transcript above</div>
+  </div>
+
+  <div id="updateBanner" class="update-banner" style="display: none;">
+    🎉 <span id="updateText">New version available!</span>
+    <a href="https://github.com/outerbanks73/speaktotext-local" target="_blank">Update</a>
   </div>
 
   <a href="options.html" target="_blank" class="settings-link">
