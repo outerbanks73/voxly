@@ -203,11 +203,12 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 
 ## 8. Future Roadmap
 
-### 1.2.0 (Planned)
-- Real-time transcription for tab recording
-- Transcript editing in UI
-- Export to SRT/VTT subtitle formats
-- **Markdown/Obsidian export** - Save transcripts as `.md` files with configurable templates, YAML frontmatter, and folder selection (works with Obsidian, Logseq, or any markdown-based system)
+### 1.2.0 (Released)
+- ✅ Real-time transcription for tab recording
+- ✅ Transcript editing in UI
+- ✅ Export to SRT/VTT subtitle formats
+- ✅ **Markdown/Obsidian export** - Save transcripts as `.md` files with configurable templates, YAML frontmatter
+- ✅ **Custom storage folder** - Users can configure where downloaded media files are stored
 
 ### 1.3.0 (Planned)
 - **Safari extension** - Same backend, cross-browser support (Chrome + Safari)

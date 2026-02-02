@@ -19,10 +19,12 @@
 |---------|-------------|
 | 📁 **File Upload** | Transcribe audio/video files (MP3, WAV, M4A, MP4, FLAC, etc.) |
 | 🔗 **URL Support** | Transcribe from YouTube, Spotify, podcasts, and 30+ streaming sites (auto-detects URLs) |
-| 🎬 **Tab Recording** | Record and transcribe audio playing in browser tabs |
+| 🎬 **Tab Recording** | Record and transcribe audio playing in browser tabs (standard or real-time mode) |
 | 👥 **Speaker Diarization** | Identify who is speaking (optional, requires free Hugging Face account) |
 | ⚡ **Multiple Models** | Choose accuracy vs. speed with different Whisper models |
 | 🔒 **100% Local** | All processing happens on your machine - complete privacy |
+| ✏️ **Edit & Export** | Edit transcripts in-app, export as TXT, Markdown, SRT, or WebVTT |
+| 📂 **Custom Storage** | Configure where downloaded media files are stored |
 
 ---
 

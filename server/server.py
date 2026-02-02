@@ -30,7 +30,7 @@ import uvicorn
 app = FastAPI(
     title="SpeakToText Local",
     description="Local audio transcription server with speaker diarization",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 # Allow CORS for Chrome extension
@@ -45,8 +45,36 @@ app.add_middleware(
 # Global state for job tracking
 jobs = {}
 
+# Settings file for persistent configuration
+SETTINGS_FILE = Path(__file__).parent / "settings.json"
+
+def load_settings():
+    """Load settings from file."""
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE) as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+def save_settings(settings):
+    """Save settings to file."""
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(settings, f, indent=2)
+
+def get_cache_dir():
+    """Get the cache directory, respecting user settings."""
+    settings = load_settings()
+    custom_folder = settings.get('storage_folder', '').strip()
+    if custom_folder:
+        cache_path = Path(custom_folder)
+        cache_path.mkdir(parents=True, exist_ok=True)
+        return cache_path
+    return Path(tempfile.gettempdir()) / "speaktotext_cache"
+
 # Cache directory for downloaded audio
-CACHE_DIR = Path(tempfile.gettempdir()) / "speaktotext_cache"
+CACHE_DIR = get_cache_dir()
 CACHE_DIR.mkdir(exist_ok=True)
 CACHE_MAX_AGE = 24 * 60 * 60  # 24 hours in seconds
 
@@ -292,6 +320,106 @@ async def transcribe_file(
     return {"job_id": job_id, "status": "queued"}
 
 
+# Real-time transcription state
+realtime_sessions = {}
+
+
+@app.post("/transcribe/realtime/start")
+async def start_realtime(model: str = Form("tiny")):
+    """Start a real-time transcription session."""
+    import uuid
+    session_id = str(uuid.uuid4())
+    realtime_sessions[session_id] = {
+        'model': model,
+        'chunks': [],
+        'transcripts': [],
+        'status': 'active',
+        'created': time.time()
+    }
+    return {"session_id": session_id, "status": "active"}
+
+
+@app.post("/transcribe/realtime/chunk/{session_id}")
+async def add_realtime_chunk(
+    session_id: str,
+    chunk: UploadFile = File(...)
+):
+    """Add an audio chunk to a real-time session and get transcription."""
+    if session_id not in realtime_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = realtime_sessions[session_id]
+    if session['status'] != 'active':
+        raise HTTPException(status_code=400, detail="Session not active")
+
+    # Save chunk to temp file
+    chunk_data = await chunk.read()
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.webm')
+    temp_file.write(chunk_data)
+    temp_file.close()
+
+    # Transcribe the chunk using worker subprocess
+    try:
+        cmd = [
+            PYTHON_EXECUTABLE,
+            str(WORKER_SCRIPT),
+            '--audio', temp_file.name,
+            '--model', session['model'],
+            '--job-id', f'realtime-{session_id}'
+        ]
+
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=60
+        )
+
+        Path(temp_file.name).unlink(missing_ok=True)
+
+        if result.returncode == 0:
+            output = json.loads(result.stdout)
+            if output.get('result'):
+                transcript = output['result'].get('full_text', '')
+                session['transcripts'].append(transcript)
+                return {
+                    "status": "ok",
+                    "transcript": transcript,
+                    "all_transcripts": session['transcripts']
+                }
+
+        return {"status": "ok", "transcript": "", "all_transcripts": session['transcripts']}
+
+    except Exception as e:
+        Path(temp_file.name).unlink(missing_ok=True)
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/transcribe/realtime/stop/{session_id}")
+async def stop_realtime(session_id: str):
+    """Stop a real-time transcription session."""
+    if session_id not in realtime_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = realtime_sessions[session_id]
+    session['status'] = 'stopped'
+
+    full_transcript = ' '.join(session['transcripts'])
+
+    # Clean up old sessions (older than 1 hour)
+    now = time.time()
+    for sid in list(realtime_sessions.keys()):
+        if now - realtime_sessions[sid].get('created', 0) > 3600:
+            del realtime_sessions[sid]
+
+    return {
+        "status": "stopped",
+        "full_transcript": full_transcript,
+        "segments": session['transcripts']
+    }
+
+
 @app.post("/transcribe/url")
 async def transcribe_url(
     url: str = Form(...),
@@ -346,6 +474,33 @@ async def list_models():
             {"id": "medium", "name": "Medium", "description": "High accuracy (~5GB)"},
             {"id": "large", "name": "Large", "description": "Best accuracy (~10GB)"},
         ]
+    }
+
+
+@app.post("/settings/storage")
+async def update_storage_settings(request: dict):
+    """Update storage folder setting."""
+    global CACHE_DIR
+    folder = request.get('folder', '').strip()
+
+    settings = load_settings()
+    settings['storage_folder'] = folder
+    save_settings(settings)
+
+    # Update the cache directory
+    CACHE_DIR = get_cache_dir()
+    CACHE_DIR.mkdir(exist_ok=True)
+
+    return {"status": "ok", "storage_folder": str(CACHE_DIR)}
+
+
+@app.get("/settings")
+async def get_settings():
+    """Get current settings."""
+    settings = load_settings()
+    return {
+        "storage_folder": settings.get('storage_folder', ''),
+        "current_cache_dir": str(CACHE_DIR)
     }
 
 

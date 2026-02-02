@@ -10,6 +10,11 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let recordingStartTime = null;
 let recordingTimer = null;
+let currentResult = null; // Store the result for export
+let isEditMode = false;
+let realtimeSessionId = null;
+let realtimeChunkInterval = null;
+let isRealtimeMode = false;
 
 // DOM Elements
 const statusBar = document.getElementById('statusBar');
@@ -163,27 +168,221 @@ function setupButtons() {
   // Result actions
   document.getElementById('copyBtn').addEventListener('click', () => {
     navigator.clipboard.writeText(transcriptBox.textContent);
-    document.getElementById('copyBtn').textContent = 'Copied!';
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = '✅ Copied!';
     setTimeout(() => {
-      document.getElementById('copyBtn').textContent = 'Copy';
+      btn.textContent = '📋 Copy';
     }, 2000);
   });
 
-  document.getElementById('downloadBtn').addEventListener('click', () => {
-    const blob = new Blob([transcriptBox.textContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'transcript.txt';
-    a.click();
-    URL.revokeObjectURL(url);
+  // Edit mode toggle
+  document.getElementById('editBtn').addEventListener('click', () => {
+    isEditMode = !isEditMode;
+    const editBtn = document.getElementById('editBtn');
+    const editNotice = document.getElementById('editNotice');
+
+    if (isEditMode) {
+      transcriptBox.contentEditable = 'true';
+      transcriptBox.classList.add('editable');
+      editBtn.classList.add('active');
+      editBtn.textContent = '💾 Done';
+      editNotice.classList.add('show');
+      transcriptBox.focus();
+    } else {
+      transcriptBox.contentEditable = 'false';
+      transcriptBox.classList.remove('editable');
+      editBtn.classList.remove('active');
+      editBtn.textContent = '✏️ Edit';
+      editNotice.classList.remove('show');
+    }
+  });
+
+  // Export dropdown toggle
+  document.getElementById('exportBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.getElementById('exportMenu').classList.toggle('show');
+  });
+
+  // Close dropdown when clicking elsewhere
+  document.addEventListener('click', () => {
+    document.getElementById('exportMenu').classList.remove('show');
+  });
+
+  // Export as TXT
+  document.getElementById('exportTxt').addEventListener('click', () => {
+    downloadFile(transcriptBox.textContent, 'transcript.txt', 'text/plain');
+    document.getElementById('exportMenu').classList.remove('show');
+  });
+
+  // Export as Markdown
+  document.getElementById('exportMd').addEventListener('click', () => {
+    const markdown = generateMarkdown();
+    downloadFile(markdown, 'transcript.md', 'text/markdown');
+    document.getElementById('exportMenu').classList.remove('show');
+  });
+
+  // Export as SRT
+  document.getElementById('exportSrt').addEventListener('click', () => {
+    const srt = generateSRT();
+    downloadFile(srt, 'transcript.srt', 'text/plain');
+    document.getElementById('exportMenu').classList.remove('show');
+  });
+
+  // Export as VTT
+  document.getElementById('exportVtt').addEventListener('click', () => {
+    const vtt = generateVTT();
+    downloadFile(vtt, 'transcript.vtt', 'text/vtt');
+    document.getElementById('exportMenu').classList.remove('show');
   });
 
   document.getElementById('clearBtn').addEventListener('click', () => {
     resultSection.classList.remove('active');
     transcriptBox.textContent = '';
+    transcriptBox.innerHTML = '';
     currentJobId = null;
+    currentResult = null;
+    isEditMode = false;
+    document.getElementById('editBtn').classList.remove('active');
+    document.getElementById('editBtn').textContent = '✏️ Edit';
+    document.getElementById('editNotice').classList.remove('show');
+    transcriptBox.contentEditable = 'false';
+    transcriptBox.classList.remove('editable');
   });
+}
+
+// Helper to download files
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Generate Markdown format
+function generateMarkdown() {
+  if (!currentResult) {
+    return transcriptBox.textContent;
+  }
+
+  const now = new Date().toISOString();
+  let md = `---
+title: Transcript
+date: ${now}
+type: transcript
+---
+
+# Transcript
+
+`;
+
+  if (currentResult.speakers && currentResult.speakers.length > 0) {
+    md += `**Speakers:** ${currentResult.speakers.join(', ')}\n\n---\n\n`;
+    currentResult.segments.forEach(seg => {
+      md += `**[${seg.timestamp}] ${seg.speaker}:**\n${seg.text}\n\n`;
+    });
+  } else if (currentResult.segments) {
+    currentResult.segments.forEach(seg => {
+      md += `**[${seg.timestamp}]** ${seg.text}\n\n`;
+    });
+  } else {
+    md += currentResult.full_text || transcriptBox.textContent;
+  }
+
+  return md;
+}
+
+// Generate SRT subtitle format
+function generateSRT() {
+  if (!currentResult || !currentResult.segments) {
+    // Fallback: create single subtitle
+    return `1
+00:00:00,000 --> 00:10:00,000
+${transcriptBox.textContent}
+`;
+  }
+
+  let srt = '';
+  currentResult.segments.forEach((seg, index) => {
+    const startTime = parseTimestamp(seg.timestamp);
+    const nextSeg = currentResult.segments[index + 1];
+    const endTime = nextSeg ? parseTimestamp(nextSeg.timestamp) : addSeconds(startTime, 5);
+
+    srt += `${index + 1}\n`;
+    srt += `${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n`;
+    if (seg.speaker) {
+      srt += `[${seg.speaker}] `;
+    }
+    srt += `${seg.text}\n\n`;
+  });
+
+  return srt;
+}
+
+// Generate WebVTT subtitle format
+function generateVTT() {
+  if (!currentResult || !currentResult.segments) {
+    return `WEBVTT
+
+00:00:00.000 --> 00:10:00.000
+${transcriptBox.textContent}
+`;
+  }
+
+  let vtt = 'WEBVTT\n\n';
+  currentResult.segments.forEach((seg, index) => {
+    const startTime = parseTimestamp(seg.timestamp);
+    const nextSeg = currentResult.segments[index + 1];
+    const endTime = nextSeg ? parseTimestamp(nextSeg.timestamp) : addSeconds(startTime, 5);
+
+    vtt += `${formatVTTTime(startTime)} --> ${formatVTTTime(endTime)}\n`;
+    if (seg.speaker) {
+      vtt += `<v ${seg.speaker}>`;
+    }
+    vtt += `${seg.text}\n\n`;
+  });
+
+  return vtt;
+}
+
+// Parse timestamp like "00:00" or "01:23" to seconds
+function parseTimestamp(timestamp) {
+  const parts = timestamp.split(':').map(Number);
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
+}
+
+// Add seconds to a time value
+function addSeconds(seconds, add) {
+  return seconds + add;
+}
+
+// Format time for SRT (HH:MM:SS,mmm)
+function formatSRTTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms, 3)}`;
+}
+
+// Format time for VTT (HH:MM:SS.mmm)
+function formatVTTTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms, 3)}`;
+}
+
+function pad(num, size = 2) {
+  return num.toString().padStart(size, '0');
 }
 
 // Get HF token from storage
@@ -277,6 +476,9 @@ async function transcribeUrl(url) {
 
 // Start recording tab audio
 async function startRecording() {
+  const mode = document.getElementById('recordingMode').value;
+  isRealtimeMode = (mode === 'realtime');
+
   try {
     // Get current tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -294,27 +496,40 @@ async function startRecording() {
     });
 
     recordedChunks = [];
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
 
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        recordedChunks.push(e.data);
-      }
-    };
+    if (isRealtimeMode) {
+      // Real-time mode: start session and send chunks periodically
+      await startRealtimeSession(stream);
+    } else {
+      // Standard mode: record everything, transcribe at end
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
 
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach(track => track.stop());
-      const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-      await transcribeRecording(blob);
-    };
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordedChunks.push(e.data);
+        }
+      };
 
-    mediaRecorder.start(1000); // Collect data every second
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+        await transcribeRecording(blob);
+      };
+
+      mediaRecorder.start(1000); // Collect data every second
+    }
+
     recordingStartTime = Date.now();
 
     // Update UI
     document.getElementById('startRecordBtn').style.display = 'none';
     document.getElementById('stopRecordBtn').style.display = 'block';
     document.getElementById('recordingIndicator').classList.add('active');
+
+    if (isRealtimeMode) {
+      document.getElementById('realtimeTranscript').style.display = 'block';
+      document.getElementById('realtimeTranscript').innerHTML = '<em style="color: #999;">Listening...</em>';
+    }
 
     // Start timer
     recordingTimer = setInterval(() => {
@@ -329,6 +544,123 @@ async function startRecording() {
   }
 }
 
+// Start real-time transcription session
+async function startRealtimeSession(stream) {
+  const model = document.getElementById('modelSelectRecord').value;
+
+  try {
+    // Start session on server
+    const formData = new FormData();
+    formData.append('model', model);
+
+    const response = await fetch(`${SERVER_URL}/transcribe/realtime/start`, {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await response.json();
+    realtimeSessionId = data.session_id;
+
+    // Create media recorder for chunks
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+    let chunkBuffer = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunkBuffer.push(e.data);
+        recordedChunks.push(e.data); // Also keep for final transcript
+      }
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(track => track.stop());
+      await stopRealtimeSession();
+    };
+
+    // Start recording with smaller chunks for real-time
+    mediaRecorder.start(1000);
+
+    // Send chunks every 5 seconds for transcription
+    realtimeChunkInterval = setInterval(async () => {
+      if (chunkBuffer.length > 0 && realtimeSessionId) {
+        const blob = new Blob(chunkBuffer, { type: 'audio/webm' });
+        chunkBuffer = [];
+
+        try {
+          const formData = new FormData();
+          formData.append('chunk', blob, 'chunk.webm');
+
+          const response = await fetch(`${SERVER_URL}/transcribe/realtime/chunk/${realtimeSessionId}`, {
+            method: 'POST',
+            body: formData
+          });
+
+          const result = await response.json();
+          if (result.transcript) {
+            updateRealtimeTranscript(result.all_transcripts);
+          }
+        } catch (e) {
+          console.error('Chunk transcription error:', e);
+        }
+      }
+    }, 5000);
+
+  } catch (e) {
+    showError(`Real-time session failed: ${e.message}`);
+  }
+}
+
+// Update real-time transcript display
+function updateRealtimeTranscript(transcripts) {
+  const container = document.getElementById('realtimeTranscript');
+  if (transcripts && transcripts.length > 0) {
+    container.textContent = transcripts.join(' ');
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+// Stop real-time session
+async function stopRealtimeSession() {
+  clearInterval(realtimeChunkInterval);
+  realtimeChunkInterval = null;
+
+  if (realtimeSessionId) {
+    try {
+      const response = await fetch(`${SERVER_URL}/transcribe/realtime/stop/${realtimeSessionId}`, {
+        method: 'POST'
+      });
+
+      const result = await response.json();
+
+      // Show final result
+      if (result.full_transcript) {
+        currentResult = {
+          full_text: result.full_transcript,
+          segments: result.segments.map((text, i) => ({
+            timestamp: formatTime(i * 5),
+            text: text
+          }))
+        };
+        showResult(currentResult);
+      }
+    } catch (e) {
+      console.error('Stop session error:', e);
+    }
+
+    realtimeSessionId = null;
+  }
+
+  document.getElementById('realtimeTranscript').style.display = 'none';
+}
+
+// Format seconds to MM:SS
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const secs = (seconds % 60).toString().padStart(2, '0');
+  return `${mins}:${secs}`;
+}
+
 // Stop recording
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -336,9 +668,13 @@ function stopRecording() {
   }
 
   clearInterval(recordingTimer);
+  clearInterval(realtimeChunkInterval);
+
   document.getElementById('startRecordBtn').style.display = 'block';
   document.getElementById('stopRecordBtn').style.display = 'none';
   document.getElementById('recordingIndicator').classList.remove('active');
+
+  isRealtimeMode = false;
 }
 
 // Transcribe recording
@@ -472,12 +808,20 @@ function hideProgress() {
 
 function showResult(result) {
   resultSection.classList.add('active');
+  currentResult = result; // Store for export
 
   if (result.speakers && result.speakers.length > 0) {
     // Format with speakers
     let html = `<strong>Speakers:</strong> ${result.speakers.join(', ')}\n\n`;
     result.segments.forEach(seg => {
       html += `<span class="timestamp">[${seg.timestamp}]</span> <span class="speaker-label">${seg.speaker}:</span>\n${seg.text}\n\n`;
+    });
+    transcriptBox.innerHTML = html;
+  } else if (result.segments && result.segments.length > 0) {
+    // Format with timestamps
+    let html = '';
+    result.segments.forEach(seg => {
+      html += `<span class="timestamp">[${seg.timestamp}]</span> ${seg.text}\n\n`;
     });
     transcriptBox.innerHTML = html;
   } else {

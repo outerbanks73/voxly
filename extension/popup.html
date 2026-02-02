@@ -299,9 +299,15 @@
       gap: 8px;
     }
 
+    .result-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
     .result-actions button {
-      padding: 6px 12px;
-      font-size: 12px;
+      padding: 6px 10px;
+      font-size: 11px;
       border: 1px solid #ddd;
       background: white;
       border-radius: 4px;
@@ -309,6 +315,49 @@
     }
 
     .result-actions button:hover {
+      background: #f0f0f0;
+    }
+
+    .result-actions button.active {
+      background: #667eea;
+      color: white;
+      border-color: #667eea;
+    }
+
+    .export-dropdown {
+      position: relative;
+      display: inline-block;
+    }
+
+    .export-menu {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 100%;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 100;
+      min-width: 140px;
+    }
+
+    .export-menu.show {
+      display: block;
+    }
+
+    .export-menu button {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      text-align: left;
+      border: none;
+      background: none;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .export-menu button:hover {
       background: #f0f0f0;
     }
 
@@ -322,6 +371,27 @@
       font-size: 13px;
       line-height: 1.6;
       white-space: pre-wrap;
+    }
+
+    .transcript-box.editable {
+      background: white;
+      border-color: #667eea;
+      outline: none;
+    }
+
+    .transcript-box.editable:focus {
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+    }
+
+    .edit-notice {
+      font-size: 11px;
+      color: #666;
+      margin-top: 8px;
+      display: none;
+    }
+
+    .edit-notice.show {
+      display: block;
     }
 
     .speaker-label {
@@ -452,17 +522,24 @@
   <!-- Record Tab -->
   <div id="tab-record" class="tab-content">
     <p style="font-size: 13px; color: #666; margin-bottom: 16px;">
-      Record audio from the current browser tab. Click Start to begin recording, then Stop when finished.
+      Record audio from the current browser tab. Choose standard or real-time mode.
     </p>
     <div class="recording-indicator" id="recordingIndicator">
       <div class="recording-dot"></div>
       <span>Recording... <span id="recordingTime">00:00</span></span>
     </div>
     <div class="form-group">
+      <label>Recording Mode</label>
+      <select id="recordingMode">
+        <option value="standard">Standard (transcribe after recording)</option>
+        <option value="realtime">Real-time (live transcription)</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label>Whisper Model</label>
       <select id="modelSelectRecord">
-        <option value="base">Base (recommended)</option>
-        <option value="tiny">Tiny (fastest)</option>
+        <option value="tiny">Tiny (fastest - recommended for real-time)</option>
+        <option value="base">Base (recommended for standard)</option>
         <option value="small">Small (better accuracy)</option>
         <option value="medium">Medium (high accuracy)</option>
         <option value="large">Large (best accuracy)</option>
@@ -474,6 +551,9 @@
     <button class="btn btn-stop" id="stopRecordBtn" style="display: none; margin-top: 8px;">
       Stop Recording
     </button>
+    <div id="realtimeTranscript" style="display: none; margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 6px; font-size: 13px; max-height: 150px; overflow-y: auto;">
+      <em style="color: #999;">Live transcript will appear here...</em>
+    </div>
   </div>
 
   <!-- Progress Section -->
@@ -490,12 +570,22 @@
     <div class="result-header">
       <h3>Transcript</h3>
       <div class="result-actions">
-        <button id="copyBtn">Copy</button>
-        <button id="downloadBtn">Download</button>
-        <button id="clearBtn">Clear</button>
+        <button id="copyBtn">📋 Copy</button>
+        <button id="editBtn">✏️ Edit</button>
+        <div class="export-dropdown">
+          <button id="exportBtn">💾 Export ▾</button>
+          <div class="export-menu" id="exportMenu">
+            <button id="exportTxt">📄 Text (.txt)</button>
+            <button id="exportMd">📝 Markdown (.md)</button>
+            <button id="exportSrt">🎬 Subtitles (.srt)</button>
+            <button id="exportVtt">🎬 WebVTT (.vtt)</button>
+          </div>
+        </div>
+        <button id="clearBtn">🗑️ Clear</button>
       </div>
     </div>
-    <div class="transcript-box" id="transcriptBox"></div>
+    <div class="transcript-box" id="transcriptBox" spellcheck="false"></div>
+    <div class="edit-notice" id="editNotice">✏️ Edit mode: Make changes directly in the transcript above</div>
   </div>
 
   <a href="options.html" target="_blank" class="settings-link">

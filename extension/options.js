@@ -9,12 +9,16 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadSettings() {
-  chrome.storage.sync.get(['hfToken'], (result) => {
+  chrome.storage.sync.get(['hfToken', 'storageFolder'], (result) => {
     if (result.hfToken) {
       document.getElementById('hfTokenInput').value = result.hfToken;
       updateTokenStatus('saved');
     } else {
       updateTokenStatus('empty');
+    }
+
+    if (result.storageFolder) {
+      document.getElementById('storageFolderInput').value = result.storageFolder;
     }
   });
 }
@@ -137,5 +141,38 @@ function setupEventListeners() {
     } else {
       updateTokenStatus('invalid');
     }
+  });
+
+  // Save storage folder
+  document.getElementById('saveStorageBtn').addEventListener('click', async () => {
+    const folder = document.getElementById('storageFolderInput').value.trim();
+    const statusEl = document.getElementById('storageStatus');
+
+    // Save to extension storage
+    chrome.storage.sync.set({ storageFolder: folder }, async () => {
+      // Also update the server
+      try {
+        const response = await fetch(`${SERVER_URL}/settings/storage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folder: folder })
+        });
+
+        if (response.ok) {
+          statusEl.className = 'status-message success';
+          statusEl.textContent = folder ? 'Storage folder saved!' : 'Using system default folder.';
+        } else {
+          statusEl.className = 'status-message success';
+          statusEl.textContent = 'Setting saved. Server will use it on next restart.';
+        }
+      } catch (e) {
+        statusEl.className = 'status-message success';
+        statusEl.textContent = 'Setting saved locally. Start server to apply.';
+      }
+
+      setTimeout(() => {
+        statusEl.className = 'status-message';
+      }, 3000);
+    });
   });
 }
