@@ -233,6 +233,56 @@
     .toggle-visibility:hover {
       background: #f0f0f0;
     }
+
+    .token-status {
+      margin-top: 8px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .token-status.valid {
+      color: #28a745;
+    }
+
+    .token-status.invalid {
+      color: #dc3545;
+    }
+
+    .token-status.checking {
+      color: #6c757d;
+    }
+
+    .troubleshoot-box {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      padding: 16px;
+      font-size: 13px;
+    }
+
+    .troubleshoot-box h4 {
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+
+    .troubleshoot-box ul {
+      margin-left: 16px;
+    }
+
+    .troubleshoot-box li {
+      margin-bottom: 6px;
+      line-height: 1.5;
+    }
+
+    code {
+      background: #e9ecef;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -258,17 +308,18 @@
 
       <!-- Hugging Face Token -->
       <div class="section">
-        <h2>Speaker Diarization</h2>
+        <h2>Speaker Diarization (Who's Speaking?)</h2>
         <div class="info-box">
-          <h3>What is this?</h3>
-          <p>Speaker diarization identifies who is speaking in the audio. To enable this feature, you need a free Hugging Face token.</p>
+          <h3>🎯 Setup Guide</h3>
+          <p>Speaker diarization identifies WHO is speaking in the audio. Follow these steps to enable it:</p>
           <ol>
-            <li>Create a free account at <a href="https://huggingface.co/join" target="_blank">huggingface.co</a></li>
-            <li>Go to <a href="https://huggingface.co/settings/tokens" target="_blank">Settings → Access Tokens</a></li>
-            <li>Create a new token with "Read" access</li>
-            <li>Accept the terms at <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank">pyannote/speaker-diarization-3.1</a></li>
-            <li>Paste your token below</li>
+            <li><strong>Create Account:</strong> Sign up free at <a href="https://huggingface.co/join" target="_blank">huggingface.co/join</a></li>
+            <li><strong>Accept License #1:</strong> Go to <a href="https://huggingface.co/pyannote/segmentation-3.0" target="_blank">pyannote/segmentation-3.0</a> and click "Agree and access repository"</li>
+            <li><strong>Accept License #2:</strong> Go to <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank">pyannote/speaker-diarization-3.1</a> and click "Agree and access repository"</li>
+            <li><strong>Create Token:</strong> Go to <a href="https://huggingface.co/settings/tokens" target="_blank">Settings → Access Tokens</a> → "New token" → Select "Read" → Copy token</li>
+            <li><strong>Paste Below:</strong> Enter your token starting with <code>hf_</code></li>
           </ol>
+          <p style="margin-top: 12px; color: #856404;"><strong>⚠️ Important:</strong> You MUST accept BOTH model licenses (steps 2 & 3) or diarization will fail!</p>
         </div>
 
         <div class="form-group" style="margin-top: 16px;">
@@ -277,11 +328,26 @@
             <input type="password" id="hfTokenInput" placeholder="hf_xxxxxxxxxxxxxxxxx">
             <button class="toggle-visibility" id="toggleToken">👁️</button>
           </div>
-          <p class="help-text">Your token is stored locally and never sent anywhere except to Hugging Face for authentication.</p>
+          <div id="tokenStatusIndicator" class="token-status"></div>
+          <p class="help-text">Your token is stored locally and only sent to Hugging Face for model access.</p>
         </div>
 
-        <button class="btn btn-primary" id="saveTokenBtn">Save Token</button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary" id="saveTokenBtn">Save Token</button>
+          <button class="btn btn-secondary" id="testTokenBtn">Test Token</button>
+        </div>
         <div class="status-message" id="tokenStatus"></div>
+
+        <!-- Troubleshooting -->
+        <div class="troubleshoot-box" style="margin-top: 16px;">
+          <h4>🔧 Troubleshooting</h4>
+          <ul>
+            <li><strong>"Access denied"</strong> → Accept both model licenses (steps 2 & 3 above)</li>
+            <li><strong>"Token invalid"</strong> → Create a new token at huggingface.co/settings/tokens</li>
+            <li><strong>"No speakers detected"</strong> → Audio may be too short or single speaker</li>
+            <li><strong>"Out of memory"</strong> → Use a smaller Whisper model (tiny or base)</li>
+          </ul>
+        </div>
       </div>
 
       <!-- About -->

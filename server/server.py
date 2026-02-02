@@ -14,7 +14,10 @@ import os
 import sys
 import tempfile
 import subprocess
-import asyncio
+import hashlib
+import time
+import re
+import threading
 from pathlib import Path
 from typing import Optional
 import json
@@ -41,281 +44,208 @@ app.add_middleware(
 
 # Global state for job tracking
 jobs = {}
-whisper_model = None
-diarization_pipeline = None
+
+# Cache directory for downloaded audio
+CACHE_DIR = Path(tempfile.gettempdir()) / "speaktotext_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+CACHE_MAX_AGE = 24 * 60 * 60  # 24 hours in seconds
+
+# Path to the worker script
+WORKER_SCRIPT = Path(__file__).parent / "worker.py"
+
+# Find the correct Python interpreter (handle venv)
+def get_python_executable():
+    """Get the Python executable, preferring venv if active."""
+    # Check if we're in a venv
+    venv_python = Path(__file__).parent / "venv" / "bin" / "python"
+    if venv_python.exists():
+        return str(venv_python)
+    # Fall back to current interpreter
+    return sys.executable
+
+PYTHON_EXECUTABLE = get_python_executable()
 
 
-def get_whisper_model(model_name: str = "base"):
-    """Lazy-load Whisper model."""
-    global whisper_model
-    if whisper_model is None:
-        import whisper
-        print(f"Loading Whisper model '{model_name}'...")
-        whisper_model = whisper.load_model(model_name)
-    return whisper_model
+def cleanup_cache():
+    """Remove cached files older than CACHE_MAX_AGE."""
+    try:
+        now = time.time()
+        for cache_file in CACHE_DIR.glob("*.mp3"):
+            if now - cache_file.stat().st_mtime > CACHE_MAX_AGE:
+                cache_file.unlink(missing_ok=True)
+    except Exception:
+        pass  # Ignore cache cleanup errors
 
 
-def get_diarization_pipeline(hf_token: str):
-    """Lazy-load diarization pipeline."""
-    global diarization_pipeline
-    if diarization_pipeline is None and hf_token:
-        import torch
-
-        # Set token
-        os.environ["HF_TOKEN"] = hf_token
-        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
-
-        # Fix PyTorch 2.6+ weights_only security issue
-        torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
-
-        # Monkey-patch huggingface_hub
-        import huggingface_hub
-        original_hf_hub_download = huggingface_hub.hf_hub_download
-
-        def patched_hf_hub_download(*args, **kwargs):
-            if 'use_auth_token' in kwargs:
-                kwargs['token'] = kwargs.pop('use_auth_token')
-            return original_hf_hub_download(*args, **kwargs)
-
-        huggingface_hub.hf_hub_download = patched_hf_hub_download
-        import huggingface_hub.file_download
-        huggingface_hub.file_download.hf_hub_download = patched_hf_hub_download
-
-        # Patch torch.load
-        original_torch_load = torch.load
-
-        def patched_torch_load(*args, **kwargs):
-            kwargs['weights_only'] = False
-            return original_torch_load(*args, **kwargs)
-
-        torch.load = patched_torch_load
-
-        # Patch lightning_fabric
-        import lightning_fabric.utilities.cloud_io
-
-        def patched_pl_load(path_or_url, map_location=None, **kwargs):
-            return original_torch_load(path_or_url, map_location=map_location, weights_only=False)
-
-        lightning_fabric.utilities.cloud_io._load = patched_pl_load
-
-        from pyannote.audio import Pipeline
-
-        print("Loading speaker diarization model...")
-        diarization_pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
-
-        # Use MPS on Apple Silicon if available
-        if torch.backends.mps.is_available():
-            print("Using Apple Silicon GPU (MPS)...")
-            diarization_pipeline.to(torch.device("mps"))
-
-    return diarization_pipeline
+def get_cache_path(url: str) -> Path:
+    """Get cache file path for a URL."""
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
+    return CACHE_DIR / f"{url_hash}.mp3"
 
 
-def convert_to_wav(input_path: str) -> str:
-    """Convert audio to 16kHz mono WAV."""
-    temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-    temp_wav.close()
+def download_audio_from_url(url: str, job_id: str = None) -> str:
+    """Download audio from URL using yt-dlp with optimizations."""
+    # Check cache first
+    cache_path = get_cache_path(url)
+    if cache_path.exists():
+        cache_age = time.time() - cache_path.stat().st_mtime
+        if cache_age < CACHE_MAX_AGE:
+            if job_id:
+                jobs[job_id]['progress'] = 'Using cached audio...'
+            return str(cache_path)
 
-    subprocess.run(
-        ['ffmpeg', '-i', input_path, '-acodec', 'pcm_s16le', '-ar', '16000',
-         '-ac', '1', '-y', temp_wav.name],
-        capture_output=True,
-        check=True
-    )
-    return temp_wav.name
+    # Cleanup old cache files
+    cleanup_cache()
 
-
-def download_audio_from_url(url: str) -> str:
-    """Download audio from URL using yt-dlp."""
     temp_dir = tempfile.mkdtemp()
     output_path = os.path.join(temp_dir, "audio.%(ext)s")
 
     try:
-        subprocess.run(
-            ['yt-dlp', '-x', '--audio-format', 'wav', '-o', output_path, url],
-            capture_output=True,
-            check=True
+        if job_id:
+            jobs[job_id]['progress'] = 'Downloading audio...'
+            jobs[job_id]['stage'] = 'downloading'
+            jobs[job_id]['download_percent'] = 0
+
+        # Optimized yt-dlp command
+        process = subprocess.Popen(
+            [
+                'yt-dlp', '-x',
+                '--audio-format', 'mp3',
+                '--audio-quality', '128K',
+                '--socket-timeout', '30',
+                '--newline',
+                '-o', output_path,
+                url
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
         )
+
+        # Parse progress from output
+        try:
+            for line in process.stdout:
+                if job_id and '[download]' in line:
+                    match = re.search(r'(\d+\.?\d*)%', line)
+                    if match:
+                        percent = float(match.group(1))
+                        jobs[job_id]['download_percent'] = int(percent)
+                        jobs[job_id]['progress'] = f'Downloading audio... {int(percent)}%'
+        except Exception:
+            pass
+
+        process.wait(timeout=600)
+
+        if process.returncode != 0:
+            raise Exception(f"yt-dlp failed with exit code {process.returncode}")
+
         # Find the downloaded file
+        audio_file = None
         for f in os.listdir(temp_dir):
             if f.startswith("audio"):
-                return os.path.join(temp_dir, f)
-        raise Exception("Download completed but audio file not found")
+                audio_file = os.path.join(temp_dir, f)
+                break
+
+        if not audio_file:
+            raise Exception("Download completed but audio file not found")
+
+        # Copy to cache
+        import shutil
+        shutil.copy2(audio_file, cache_path)
+
+        if job_id:
+            jobs[job_id]['progress'] = 'Download complete'
+            jobs[job_id]['download_percent'] = 100
+
+        return audio_file
+
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise Exception("Download timed out after 10 minutes")
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="yt-dlp not installed. Run: pip install yt-dlp")
+        raise Exception("yt-dlp not installed. Please install it with: brew install yt-dlp")
 
 
-def format_timestamp(seconds: float) -> str:
-    """Convert seconds to HH:MM:SS format."""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
-
-
-def assign_speakers(whisper_segments: list, diarization_segments: list) -> list:
-    """Assign speaker labels to transcript segments."""
-    result = []
-
-    for w_seg in whisper_segments:
-        w_start = w_seg['start']
-        w_end = w_seg['end']
-        w_mid = (w_start + w_end) / 2
-
-        best_speaker = "UNKNOWN"
-        best_overlap = 0
-
-        for d_seg in diarization_segments:
-            overlap_start = max(w_start, d_seg['start'])
-            overlap_end = min(w_end, d_seg['end'])
-            overlap = max(0, overlap_end - overlap_start)
-
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_speaker = d_seg['speaker']
-
-        if best_overlap == 0:
-            for d_seg in diarization_segments:
-                if d_seg['start'] <= w_mid <= d_seg['end']:
-                    best_speaker = d_seg['speaker']
-                    break
-
-        result.append({
-            'start': w_start,
-            'end': w_end,
-            'text': w_seg['text'].strip(),
-            'speaker': best_speaker
-        })
-
-    return result
-
-
-def create_speaker_mapping(segments: list) -> dict:
-    """Map SPEAKER_XX to Speaker 1, Speaker 2, etc."""
-    speakers_seen = []
-    for seg in segments:
-        if seg['speaker'] not in speakers_seen:
-            speakers_seen.append(seg['speaker'])
-    return {spk: f"Speaker {i+1}" for i, spk in enumerate(speakers_seen)}
-
-
-def format_transcript(segments: list, with_speakers: bool = False) -> dict:
-    """Format transcript for API response."""
-    if with_speakers:
-        speaker_map = create_speaker_mapping(segments)
-
-        # Group consecutive segments by speaker
-        grouped = []
-        current_speaker = None
-        current_text = []
-        current_start = None
-
-        for seg in segments:
-            speaker = speaker_map.get(seg['speaker'], seg['speaker'])
-
-            if speaker != current_speaker:
-                if current_speaker and current_text:
-                    grouped.append({
-                        'timestamp': format_timestamp(current_start),
-                        'speaker': current_speaker,
-                        'text': ' '.join(current_text)
-                    })
-                current_speaker = speaker
-                current_text = [seg['text']]
-                current_start = seg['start']
-            else:
-                current_text.append(seg['text'])
-
-        if current_speaker and current_text:
-            grouped.append({
-                'timestamp': format_timestamp(current_start),
-                'speaker': current_speaker,
-                'text': ' '.join(current_text)
-            })
-
-        return {
-            'speakers': list(set(speaker_map.values())),
-            'segments': grouped,
-            'full_text': '\n\n'.join([
-                f"[{s['timestamp']}] {s['speaker']}:\n{s['text']}"
-                for s in grouped
-            ])
-        }
-    else:
-        return {
-            'segments': [
-                {
-                    'timestamp': format_timestamp(seg['start']),
-                    'text': seg['text'].strip()
-                }
-                for seg in segments
-            ],
-            'full_text': ' '.join([seg['text'].strip() for seg in segments])
-        }
-
-
-async def process_transcription(
-    job_id: str,
-    audio_path: str,
-    hf_token: Optional[str],
-    model_name: str
-):
-    """Background task for transcription."""
+def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[str], model_name: str):
+    """Run transcription in a separate subprocess to avoid stdout/stderr issues."""
     try:
         jobs[job_id]['status'] = 'processing'
-        jobs[job_id]['progress'] = 'Converting audio...'
+        jobs[job_id]['stage'] = 'transcribing'
+        jobs[job_id]['progress'] = f'Transcribing with Whisper ({model_name})...'
 
-        # Convert to WAV
-        wav_path = convert_to_wav(audio_path)
+        # Build command to run worker script
+        cmd = [
+            PYTHON_EXECUTABLE,
+            str(WORKER_SCRIPT),
+            '--audio', audio_path,
+            '--model', model_name,
+            '--job-id', job_id
+        ]
 
+        if hf_token:
+            cmd.extend(['--hf-token', hf_token])
+
+        # Run worker in subprocess - completely isolated stdout/stderr
+        # Use subprocess.DEVNULL for stderr to avoid broken pipe from tqdm progress bars
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1800  # 30 minute timeout
+        )
+
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Transcription failed"
+            raise Exception(error_msg[:500])
+
+        # Parse result from stdout (worker outputs JSON)
         try:
-            # Transcribe with Whisper
-            jobs[job_id]['progress'] = 'Transcribing audio...'
-            model = get_whisper_model(model_name)
-            result = model.transcribe(wav_path, verbose=False)
-
-            jobs[job_id]['progress'] = 'Transcription complete'
-
-            # Speaker diarization if token provided
-            if hf_token:
-                jobs[job_id]['progress'] = 'Identifying speakers...'
-                pipeline = get_diarization_pipeline(hf_token)
-
-                if pipeline:
-                    diarization = pipeline(wav_path)
-
-                    diarization_segments = []
-                    for turn, _, speaker in diarization.itertracks(yield_label=True):
-                        diarization_segments.append({
-                            'start': turn.start,
-                            'end': turn.end,
-                            'speaker': speaker
-                        })
-
-                    combined = assign_speakers(result['segments'], diarization_segments)
-                    formatted = format_transcript(combined, with_speakers=True)
-                else:
-                    formatted = format_transcript(result['segments'], with_speakers=False)
-            else:
-                formatted = format_transcript(result['segments'], with_speakers=False)
+            output = json.loads(result.stdout)
+            if output.get('error'):
+                raise Exception(output['error'])
 
             jobs[job_id]['status'] = 'completed'
-            jobs[job_id]['result'] = formatted
-            jobs[job_id]['language'] = result.get('language', 'unknown')
+            jobs[job_id]['stage'] = 'complete'
+            jobs[job_id]['progress'] = 'Done!'
+            jobs[job_id]['result'] = output['result']
+            jobs[job_id]['language'] = output.get('language', 'unknown')
+        except json.JSONDecodeError:
+            raise Exception(f"Worker output parsing failed: {result.stdout[:200]}")
 
-        finally:
-            # Cleanup WAV file
-            Path(wav_path).unlink(missing_ok=True)
-
+    except subprocess.TimeoutExpired:
+        jobs[job_id]['status'] = 'error'
+        jobs[job_id]['error'] = 'Transcription timed out after 30 minutes'
     except Exception as e:
         jobs[job_id]['status'] = 'error'
         jobs[job_id]['error'] = str(e)
+
+        # Provide helpful error messages
+        error_str = str(e).lower()
+        if 'token' in error_str or 'auth' in error_str:
+            jobs[job_id]['error_hint'] = 'Your Hugging Face token may be invalid.'
+        elif 'access' in error_str or 'denied' in error_str:
+            jobs[job_id]['error_hint'] = 'Please accept the model licenses at huggingface.co'
     finally:
-        # Cleanup original audio if it was a temp file
-        if audio_path.startswith(tempfile.gettempdir()):
+        # Cleanup temp files
+        if audio_path.startswith(tempfile.gettempdir()) and 'speaktotext_cache' not in audio_path:
             Path(audio_path).unlink(missing_ok=True)
+
+
+def process_transcription_thread(job_id: str, audio_path: str, hf_token: Optional[str], model_name: str):
+    """Background thread that runs the transcription worker."""
+    run_transcription_worker(job_id, audio_path, hf_token, model_name)
+
+
+def process_url_transcription(job_id: str, url: str, hf_token: Optional[str], model_name: str):
+    """Background task for URL download and transcription."""
+    try:
+        jobs[job_id]['status'] = 'downloading'
+        audio_path = download_audio_from_url(url, job_id)
+        run_transcription_worker(job_id, audio_path, hf_token, model_name)
+    except Exception as e:
+        jobs[job_id]['status'] = 'error'
+        jobs[job_id]['error'] = str(e)
 
 
 @app.get("/")
@@ -332,7 +262,6 @@ async def health():
 
 @app.post("/transcribe/file")
 async def transcribe_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     hf_token: Optional[str] = Form(None),
     model: str = Form("base")
@@ -353,49 +282,39 @@ async def transcribe_file(
         'filename': file.filename
     }
 
-    # Start background processing
-    background_tasks.add_task(
-        process_transcription,
-        job_id,
-        temp_file.name,
-        hf_token,
-        model
+    # Start background thread
+    thread = threading.Thread(
+        target=process_transcription_thread,
+        args=(job_id, temp_file.name, hf_token, model)
     )
+    thread.start()
 
     return {"job_id": job_id, "status": "queued"}
 
 
 @app.post("/transcribe/url")
 async def transcribe_url(
-    background_tasks: BackgroundTasks,
     url: str = Form(...),
     hf_token: Optional[str] = Form(None),
     model: str = Form("base")
 ):
     """Transcribe audio from a URL (YouTube, podcast, etc.)."""
-    # Create job first
     import uuid
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
         'status': 'queued',
-        'progress': 'Downloading audio...',
+        'progress': 'Starting download...',
+        'stage': 'queued',
+        'download_percent': 0,
         'url': url
     }
 
-    try:
-        audio_path = download_audio_from_url(url)
-    except Exception as e:
-        jobs[job_id] = {'status': 'error', 'error': str(e)}
-        return {"job_id": job_id, "status": "error", "error": str(e)}
-
-    # Start background processing
-    background_tasks.add_task(
-        process_transcription,
-        job_id,
-        audio_path,
-        hf_token,
-        model
+    # Start background thread
+    thread = threading.Thread(
+        target=process_url_transcription,
+        args=(job_id, url, hf_token, model)
     )
+    thread.start()
 
     return {"job_id": job_id, "status": "queued"}
 

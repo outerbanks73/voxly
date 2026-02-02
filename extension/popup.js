@@ -21,12 +21,50 @@ const progressText = document.getElementById('progressText');
 const resultSection = document.getElementById('resultSection');
 const transcriptBox = document.getElementById('transcriptBox');
 
+// Streaming site patterns to auto-populate URL
+const STREAMING_SITES = [
+  'youtube.com',
+  'youtu.be',
+  'vimeo.com',
+  'twitch.tv',
+  'dailymotion.com',
+  'soundcloud.com',
+  'spotify.com',
+  'podcasts.apple.com',
+  'podcasts.google.com',
+  'anchor.fm',
+  'buzzsprout.com',
+  'transistor.fm',
+  'simplecast.com',
+  'libsyn.com',
+  'podbean.com',
+  'spreaker.com',
+  'audioboom.com',
+  'megaphone.fm',
+  'acast.com',
+  'stitcher.com',
+  'overcast.fm',
+  'pocketcasts.com',
+  'castbox.fm',
+  'player.fm',
+  'radiopublic.com',
+  'pandora.com',
+  'iheart.com',
+  'tunein.com',
+  'deezer.com',
+  'tidal.com',
+  'bandcamp.com',
+  'mixcloud.com',
+  'audiomack.com'
+];
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await checkServerConnection();
   setupTabs();
   setupFileUpload();
   setupButtons();
+  await autoPopulateUrlIfStreaming();
 });
 
 // Check server connection
@@ -366,14 +404,32 @@ function pollJobStatus() {
       } else if (job.status === 'error') {
         clearInterval(pollInterval);
         hideProgress();
-        showError(job.error || 'Transcription failed');
+        let errorMsg = job.error || 'Transcription failed';
+        if (job.error_hint) {
+          errorMsg += `\n\n💡 Tip: ${job.error_hint}`;
+        }
+        showError(errorMsg);
       } else {
-        updateProgress(job.progress || 'Processing...');
+        // Update progress with stage info
+        const stage = job.stage || 'processing';
+        const progress = job.progress || 'Processing...';
+        const downloadPercent = job.download_percent;
+
+        // Update progress bar for download stage
+        if (stage === 'downloading' && downloadPercent !== undefined) {
+          progressBar.classList.remove('indeterminate');
+          progressBar.style.width = `${downloadPercent}%`;
+        } else {
+          progressBar.classList.add('indeterminate');
+          progressBar.style.width = '';
+        }
+
+        updateProgress(progress, stage);
       }
     } catch (e) {
       // Retry on network error
     }
-  }, 1000);
+  }, 500); // Poll faster for smoother progress updates
 }
 
 // UI helpers
@@ -392,8 +448,22 @@ function showProgress(text) {
   progressBar.classList.add('indeterminate');
 }
 
-function updateProgress(text) {
+function updateProgress(text, stage = '') {
   progressText.textContent = text;
+
+  // Update stage indicator if we have one
+  const stageIndicator = document.getElementById('stageIndicator');
+  if (stageIndicator && stage) {
+    const stageLabels = {
+      'queued': '⏳ Queued',
+      'downloading': '⬇️ Downloading',
+      'converting': '🔄 Converting',
+      'transcribing': '🎤 Transcribing',
+      'diarizing': '👥 Identifying Speakers',
+      'complete': '✅ Complete'
+    };
+    stageIndicator.textContent = stageLabels[stage] || stage;
+  }
 }
 
 function hideProgress() {
@@ -413,5 +483,33 @@ function showResult(result) {
   } else {
     // Plain text
     transcriptBox.textContent = result.full_text;
+  }
+}
+
+// Auto-populate URL field with current tab URL if on a streaming site
+async function autoPopulateUrlIfStreaming() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url) return;
+
+    // Skip chrome:// and other internal URLs
+    if (tab.url.startsWith('chrome://') || tab.url.startsWith('about:') || tab.url.startsWith('chrome-extension://')) {
+      return;
+    }
+
+    const url = new URL(tab.url);
+    const hostname = url.hostname.replace(/^www\./, '');
+
+    // Check if current site is a streaming site
+    const isStreamingSite = STREAMING_SITES.some(site =>
+      hostname === site || hostname.endsWith('.' + site)
+    );
+
+    if (isStreamingSite) {
+      // Use the full URL of the current tab
+      document.getElementById('urlInput').value = tab.url;
+    }
+  } catch (e) {
+    // Silently fail if we can't get the tab URL
   }
 }

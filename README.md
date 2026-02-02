@@ -18,7 +18,7 @@
 | Feature | Description |
 |---------|-------------|
 | 📁 **File Upload** | Transcribe audio/video files (MP3, WAV, M4A, MP4, FLAC, etc.) |
-| 🔗 **URL Support** | Transcribe from YouTube, podcasts, and other audio URLs |
+| 🔗 **URL Support** | Transcribe from YouTube, Spotify, podcasts, and 30+ streaming sites (auto-detects URLs) |
 | 🎬 **Tab Recording** | Record and transcribe audio playing in browser tabs |
 | 👥 **Speaker Diarization** | Identify who is speaking (optional, requires free Hugging Face account) |
 | ⚡ **Multiple Models** | Choose accuracy vs. speed with different Whisper models |
@@ -33,15 +33,18 @@
 │  🎙️ SpeakToText Local              │
 │  Private audio transcription        │
 │                                     │
-│  ┌─────┐ ┌─────┐ ┌───────────┐     │
-│  │File │ │ URL │ │Record Tab │     │
-│  └─────┘ └─────┘ └───────────┘     │
+│  ┌─────┐ ┌──────┐ ┌─────────────┐  │
+│  │ URL │ │ File │ │Record this Tab│ │
+│  └─────┘ └──────┘ └─────────────┘  │
 │                                     │
-│  📁 Click or drag file here         │
+│  We will download, then transcribe  │
+│  and save your clip.                │
+│                                     │
+│  🔗 [https://youtube.com/...]       │
 │                                     │
 │  Model: [Base (recommended) ▼]      │
 │                                     │
-│  [    Transcribe File    ]          │
+│  [    Transcribe URL    ]           │
 └─────────────────────────────────────┘
 ```
 
@@ -201,7 +204,8 @@ speaktotext-local/
 │   ├── background.js
 │   └── icons/
 ├── server/
-│   ├── server.py        # FastAPI server
+│   ├── server.py        # FastAPI server (job management, downloads)
+│   ├── worker.py        # Isolated transcription subprocess
 │   └── requirements.txt
 ├── install.sh           # macOS/Linux installer
 ├── install.bat          # Windows installer

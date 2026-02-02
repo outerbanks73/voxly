@@ -263,6 +263,14 @@
       text-align: center;
     }
 
+    .stage-indicator {
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 12px;
+      color: #667eea;
+    }
+
     .result-section {
       display: none;
       padding: 16px;
@@ -384,15 +392,15 @@
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="file">File</div>
-    <div class="tab" data-tab="url">URL</div>
-    <div class="tab" data-tab="record">Record Tab</div>
+    <div class="tab active" data-tab="url">URL</div>
+    <div class="tab" data-tab="file">File</div>
+    <div class="tab" data-tab="record">Record this Tab</div>
   </div>
 
   <div id="errorMessage" class="error-message" style="display: none;"></div>
 
   <!-- File Upload Tab -->
-  <div id="tab-file" class="tab-content active">
+  <div id="tab-file" class="tab-content">
     <div class="form-group">
       <label>Select Audio/Video File</label>
       <div class="file-input-wrapper" id="fileDropZone">
@@ -418,7 +426,10 @@
   </div>
 
   <!-- URL Tab -->
-  <div id="tab-url" class="tab-content">
+  <div id="tab-url" class="tab-content active">
+    <p class="url-description" style="font-size: 13px; color: #666; margin-bottom: 16px;">
+      We will download, then transcribe and save your clip.
+    </p>
     <div class="form-group">
       <label>Audio/Video URL</label>
       <input type="text" id="urlInput" placeholder="YouTube, podcast, or direct audio URL">
@@ -467,6 +478,7 @@
 
   <!-- Progress Section -->
   <div id="progressSection" class="progress-section">
+    <div class="stage-indicator" id="stageIndicator">⏳ Starting</div>
     <div class="progress-bar-container">
       <div class="progress-bar indeterminate" id="progressBar"></div>
     </div>
