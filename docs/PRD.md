@@ -1,13 +1,15 @@
 # SpeakToText Local - Product Requirements Document
 
-**Version:** 1.1.0
+**Version:** 1.4.0
 **Last Updated:** February 2025
 
 ---
 
 ## 1. Overview
 
-SpeakToText Local is a privacy-focused audio transcription tool consisting of a Chrome extension frontend and a local Python server backend. It transcribes audio from files, URLs, and browser tabs using OpenAI's Whisper model, with optional speaker diarization via pyannote.audio.
+SpeakToText Local is an AI data preparation tool that transforms audio and video content into structured, AI-ready formats. It consists of a Chrome extension frontend and a local Python server backend, using OpenAI's Whisper model for transcription and optional speaker diarization via pyannote.audio.
+
+**Key Value Proposition:** Convert spoken content into formats optimized for LLM consumption, RAG pipelines, knowledge bases, and data workflows.
 
 ---
 
@@ -83,19 +85,34 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 | **Speaker Diarization** | Enabled/Disabled | Disabled |
 | **HF Token** | User-provided | None |
 
-### 3.4 Output
+### 3.4 Export Formats
 
-- Timestamped segments with speaker labels (if diarization enabled)
-- Full text concatenation
-- Copy to clipboard functionality
-- Download as text file
+| Format | Use Case | Features |
+|--------|----------|----------|
+| **JSON** | APIs, databases, RAG pipelines | Full metadata, structured schema |
+| **Markdown** | Obsidian, Notion, note-taking | YAML frontmatter, formatted text |
+| **SRT** | Video editing, YouTube | Industry-standard subtitles |
+| **VTT** | Web video, HTML5 | WebVTT with speaker tags |
+| **TXT** | Universal | Plain text, simple copy |
+
+### 3.5 Metadata Enrichment
+
+Every export includes:
+- **Source**: URL, filename, or "Tab Recording"
+- **Duration**: Total audio length
+- **Word Count**: Total words in transcript
+- **Speakers**: List of identified speakers (if diarization enabled)
+- **Language**: Detected language
+- **Model**: Whisper model used
+- **Processed At**: ISO timestamp
 
 ---
 
 ## 4. Non-Functional Requirements
 
-### 4.1 Privacy
-- Zero data transmission to external servers (except yt-dlp fetches)
+### 4.1 Local Processing
+- All transcription happens on user's machine
+- No data transmission to external servers (except yt-dlp fetches)
 - No analytics or telemetry
 - No account required for core functionality
 
@@ -107,6 +124,7 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 ### 4.3 Compatibility
 - Python 3.9+
 - Chrome/Chromium browsers
+- Safari (limited - no tab recording)
 - macOS, Linux, Windows
 
 ---
@@ -118,7 +136,7 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 ```
 ┌─────────────────────────────────────┐
 │  🎙️ SpeakToText Local      [⚙️]    │
-│  Private audio transcription        │
+│  Transform audio to AI-ready data   │
 ├─────────────────────────────────────┤
 │  [URL] [File] [Record this Tab]     │  ← Tab navigation
 ├─────────────────────────────────────┤
@@ -144,10 +162,26 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 3. **Processing** → Whisper transcription in progress
 4. **Complete** → Results ready for display
 
-### 5.3 Settings Page
+### 5.3 Export Menu
+
+```
+┌─────────────────────────────────────┐
+│  [📋 Copy] [✏️ Edit] [💾 Export ▼] │
+│                    ┌───────────────┐│
+│                    │ 📄 Text (.txt)││
+│                    │ 📝 Markdown   ││
+│                    │ 🔧 JSON       ││
+│                    │ 🎬 SRT        ││
+│                    │ 🎥 VTT        ││
+│                    └───────────────┘│
+└─────────────────────────────────────┘
+```
+
+### 5.4 Settings Page
 
 - Hugging Face token input (for speaker diarization)
 - Token validation status
+- Media storage folder configuration
 - Link to pyannote model access request
 
 ---
@@ -160,6 +194,9 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 | `/transcribe/file` | POST | Upload file for transcription |
 | `/transcribe/url` | POST | Submit URL for transcription |
 | `/job/{job_id}` | GET | Poll job status |
+| `/transcribe/realtime/start` | POST | Start real-time session |
+| `/transcribe/realtime/chunk/{session_id}` | POST | Send audio chunk |
+| `/transcribe/realtime/stop/{session_id}` | POST | End session, get result |
 
 ### 6.1 Job Status Response
 
@@ -175,7 +212,16 @@ The transcription worker runs as a separate subprocess to solve critical issues:
       {"timestamp": "00:00", "speaker": "SPEAKER_00", "text": "Hello..."},
       {"timestamp": "00:05", "speaker": "SPEAKER_01", "text": "Hi there..."}
     ],
-    "full_text": "Hello... Hi there..."
+    "full_text": "Hello... Hi there...",
+    "metadata": {
+      "source": "https://youtube.com/...",
+      "duration": 125,
+      "word_count": 450,
+      "speakers": ["SPEAKER_00", "SPEAKER_01"],
+      "language": "en",
+      "model": "base",
+      "processed_at": "2025-02-03T10:30:00Z"
+    }
   },
   "language": "en"
 }
@@ -183,48 +229,62 @@ The transcription worker runs as a separate subprocess to solve critical issues:
 
 ---
 
-## 7. Version 1.1.0 Release Notes
+## 7. Version History
 
-### New Features
+### 1.4.0 (Current)
+- **JSON export** with full metadata schema
+- **Enhanced Markdown** with YAML frontmatter
+- **Metadata enrichment** (source, duration, speakers, language, word count)
+- Rebranded focus: AI data preparation tool
+- Updated documentation and vision
+
+### 1.3.0
+- Safari extension support
+- Build script for Safari (`build-safari.sh`)
+- Safari-compatible manifest without tabCapture
+- Automatic update notification system
+- Update scripts (`update.sh`, `update.bat`)
+
+### 1.2.0
+- Real-time transcription for tab recording
+- Transcript editing in UI
+- Export to SRT/VTT subtitle formats
+- Markdown/Obsidian export with YAML frontmatter
+- Custom storage folder configuration
+
+### 1.1.0
 - URL auto-population for streaming sites
 - Stage indicator in progress UI
 - Improved tab labels ("Record this Tab")
-
-### Bug Fixes
 - Fixed `[Errno 32] Broken pipe` error during transcription
 - Fixed subprocess Python path to use venv
 - Suppressed Whisper stdout pollution in worker
-
-### Architecture Changes
 - Introduced `worker.py` for isolated transcription
-- Refactored server to use subprocess-based job execution
 
 ---
 
-## 8. Future Roadmap
+## 8. Roadmap
 
-### 1.2.0 (Released)
-- ✅ Real-time transcription for tab recording
-- ✅ Transcript editing in UI
-- ✅ Export to SRT/VTT subtitle formats
-- ✅ **Markdown/Obsidian export** - Save transcripts as `.md` files with configurable templates, YAML frontmatter
-- ✅ **Custom storage folder** - Users can configure where downloaded media files are stored
+### 2.0.0 - Cloud Platform
+- User accounts with OAuth authentication
+- Cloud storage for transcripts and media (Supabase backend)
+- Transcript library with search and organization
+- Sharing and collaboration features
+- API access for automated workflows
+- Direct integrations (Notion, Google Docs, Confluence)
 
-### 1.3.0 (Released)
-- ✅ **Safari extension** - Same backend, cross-browser support (Chrome + Safari)
-- ✅ Build script for Safari (`build-safari.sh`)
-- ✅ Safari-compatible manifest without tabCapture
-- ✅ Automatic update notification system
-- ✅ Update scripts (`update.sh`, `update.bat`)
-
-### 2.0.0 (Vision)
-- Standalone desktop app (Tauri)
-- Local model fine-tuning
-- Multiple language detection and transcription
-- Custom vocabulary/terminology support
+### 2.5.0 - Custom Models
+- Local model fine-tuning on domain-specific vocabulary
+- Custom speaker voice profiles
+- Industry-specific terminology support
 - Batch file processing
-- **Notion integration** - OAuth-based export directly to Notion pages/databases
-- Additional integrations (Google Docs, Confluence, Apple Notes)
+- CLI tool for automation
+
+### 3.0.0 - Desktop App
+- Standalone desktop application (Tauri)
+- System-wide keyboard shortcuts
+- Menu bar quick access
+- Offline-first architecture
 
 ---
 
@@ -249,6 +309,7 @@ Since we don't collect analytics, success is measured by:
 2. **Issue Reports** - Active usage and feedback
 3. **Contribution PRs** - Developer engagement
 4. **User Testimonials** - Qualitative feedback
+5. **Export Usage** - Which formats users request most (via GitHub issues)
 
 ---
 

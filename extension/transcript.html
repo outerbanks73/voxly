@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpeakToText Local - Transcript</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .header p {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .content {
+      padding: 24px;
+    }
+
+    /* Metadata Panel */
+    .metadata-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+
+    .metadata-item {
+      text-align: center;
+    }
+
+    .metadata-item .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .metadata-item .value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    /* Action Bar */
+    .action-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+
+    .btn-secondary {
+      background: #e9ecef;
+      color: #495057;
+    }
+
+    .btn-secondary:hover {
+      background: #dee2e6;
+    }
+
+    .btn-secondary.active {
+      background: #667eea;
+      color: white;
+    }
+
+    /* Export Dropdown */
+    .export-dropdown {
+      position: relative;
+      display: inline-block;
+    }
+
+    .export-menu {
+      display: none;
+      position: absolute;
+      left: 0;
+      top: 100%;
+      margin-top: 4px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 100;
+      min-width: 180px;
+    }
+
+    .export-menu.show {
+      display: block;
+    }
+
+    .export-menu button {
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      text-align: left;
+      border: none;
+      background: none;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .export-menu button:hover {
+      background: #f0f0f0;
+    }
+
+    .export-menu button:first-child {
+      border-radius: 6px 6px 0 0;
+    }
+
+    .export-menu button:last-child {
+      border-radius: 0 0 6px 6px;
+    }
+
+    /* Transcript Box */
+    .transcript-container {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 300px;
+      max-height: 500px;
+      overflow-y: auto;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .transcript-container.editing {
+      background: white;
+      border-color: #667eea;
+      outline: none;
+    }
+
+    .segment {
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .segment:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .segment-header {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    .speaker-label {
+      font-weight: 600;
+      color: #667eea;
+    }
+
+    .timestamp {
+      color: #888;
+    }
+
+    .segment-text {
+      color: #333;
+    }
+
+    /* Edit Notice */
+    .edit-notice {
+      display: none;
+      padding: 12px 16px;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #856404;
+      margin-top: 16px;
+    }
+
+    .edit-notice.show {
+      display: block;
+    }
+
+    /* Status Messages */
+    .status-message {
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .status-message.success {
+      display: block;
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-message.error {
+      display: block;
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .empty-state h2 {
+      font-size: 18px;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    /* Back Link */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #667eea;
+      text-decoration: none;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .back-link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>📝 Transcript</h1>
+        <p>Manage and export your transcription</p>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="status-message" id="statusMessage"></div>
+
+      <!-- Metadata Panel -->
+      <div class="metadata-panel" id="metadataPanel">
+        <div class="metadata-item">
+          <div class="label">Source</div>
+          <div class="value" id="metaSource">-</div>
+        </div>
+        <div class="metadata-item">
+          <div class="label">Duration</div>
+          <div class="value" id="metaDuration">-</div>
+        </div>
+        <div class="metadata-item">
+          <div class="label">Words</div>
+          <div class="value" id="metaWords">-</div>
+        </div>
+        <div class="metadata-item">
+          <div class="label">Speakers</div>
+          <div class="value" id="metaSpeakers">-</div>
+        </div>
+        <div class="metadata-item">
+          <div class="label">Language</div>
+          <div class="value" id="metaLanguage">-</div>
+        </div>
+        <div class="metadata-item">
+          <div class="label">Model</div>
+          <div class="value" id="metaModel">-</div>
+        </div>
+      </div>
+
+      <!-- Action Bar -->
+      <div class="action-bar">
+        <button class="btn btn-primary" id="copyBtn">📋 Copy</button>
+        <button class="btn btn-secondary" id="editBtn">✏️ Edit</button>
+        <div class="export-dropdown">
+          <button class="btn btn-secondary" id="exportBtn">💾 Export ▾</button>
+          <div class="export-menu" id="exportMenu">
+            <button id="exportJson">🔧 JSON (.json)</button>
+            <button id="exportMd">📝 Markdown (.md)</button>
+            <button id="exportTxt">📄 Text (.txt)</button>
+            <button id="exportSrt">🎬 Subtitles (.srt)</button>
+            <button id="exportVtt">🎬 WebVTT (.vtt)</button>
+          </div>
+        </div>
+        <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
+      </div>
+
+      <!-- Transcript Container -->
+      <div class="transcript-container" id="transcriptContainer">
+        <div class="empty-state" id="emptyState">
+          <div class="icon">📭</div>
+          <h2>No transcript available</h2>
+          <p>Complete a transcription from the extension popup to see it here.</p>
+        </div>
+      </div>
+
+      <div class="edit-notice" id="editNotice">
+        ✏️ Edit mode: Make changes directly in the transcript above. Click "Edit" again to save.
+      </div>
+    </div>
+  </div>
+
+  <script src="transcript.js"></script>
+</body>
+</html>

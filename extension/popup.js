@@ -11,7 +11,7 @@ let recordedChunks = [];
 let recordingStartTime = null;
 let recordingTimer = null;
 let currentResult = null; // Store the result for export
-let isEditMode = false;
+let currentMetadata = null; // Store metadata for enriched exports
 let realtimeSessionId = null;
 let realtimeChunkInterval = null;
 let isRealtimeMode = false;
@@ -24,7 +24,6 @@ const progressSection = document.getElementById('progressSection');
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
 const resultSection = document.getElementById('resultSection');
-const transcriptBox = document.getElementById('transcriptBox');
 
 // Streaming site patterns to auto-populate URL
 const STREAMING_SITES = [
@@ -64,7 +63,7 @@ const STREAMING_SITES = [
 ];
 
 // Current extension version
-const CURRENT_VERSION = '1.3.0';
+const CURRENT_VERSION = '1.4.0';
 const GITHUB_REPO = 'outerbanks73/speaktotext-local';
 
 // Initialize
@@ -170,224 +169,11 @@ function setupButtons() {
   document.getElementById('startRecordBtn').addEventListener('click', startRecording);
   document.getElementById('stopRecordBtn').addEventListener('click', stopRecording);
 
-  // Result actions
-  document.getElementById('copyBtn').addEventListener('click', () => {
-    navigator.clipboard.writeText(transcriptBox.textContent);
-    const btn = document.getElementById('copyBtn');
-    btn.textContent = '✅ Copied!';
-    setTimeout(() => {
-      btn.textContent = '📋 Copy';
-    }, 2000);
+  // Open transcript management page
+  document.getElementById('openTranscriptBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: 'transcript.html' });
   });
-
-  // Edit mode toggle
-  document.getElementById('editBtn').addEventListener('click', () => {
-    isEditMode = !isEditMode;
-    const editBtn = document.getElementById('editBtn');
-    const editNotice = document.getElementById('editNotice');
-
-    if (isEditMode) {
-      transcriptBox.contentEditable = 'true';
-      transcriptBox.classList.add('editable');
-      editBtn.classList.add('active');
-      editBtn.textContent = '💾 Done';
-      editNotice.classList.add('show');
-      transcriptBox.focus();
-    } else {
-      transcriptBox.contentEditable = 'false';
-      transcriptBox.classList.remove('editable');
-      editBtn.classList.remove('active');
-      editBtn.textContent = '✏️ Edit';
-      editNotice.classList.remove('show');
-    }
-  });
-
-  // Export dropdown toggle
-  document.getElementById('exportBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('exportMenu').classList.toggle('show');
-  });
-
-  // Close dropdown when clicking elsewhere
-  document.addEventListener('click', () => {
-    document.getElementById('exportMenu').classList.remove('show');
-  });
-
-  // Export as TXT
-  document.getElementById('exportTxt').addEventListener('click', () => {
-    downloadFile(transcriptBox.textContent, 'transcript.txt', 'text/plain');
-    document.getElementById('exportMenu').classList.remove('show');
-  });
-
-  // Export as Markdown
-  document.getElementById('exportMd').addEventListener('click', () => {
-    const markdown = generateMarkdown();
-    downloadFile(markdown, 'transcript.md', 'text/markdown');
-    document.getElementById('exportMenu').classList.remove('show');
-  });
-
-  // Export as SRT
-  document.getElementById('exportSrt').addEventListener('click', () => {
-    const srt = generateSRT();
-    downloadFile(srt, 'transcript.srt', 'text/plain');
-    document.getElementById('exportMenu').classList.remove('show');
-  });
-
-  // Export as VTT
-  document.getElementById('exportVtt').addEventListener('click', () => {
-    const vtt = generateVTT();
-    downloadFile(vtt, 'transcript.vtt', 'text/vtt');
-    document.getElementById('exportMenu').classList.remove('show');
-  });
-
-  document.getElementById('clearBtn').addEventListener('click', () => {
-    resultSection.classList.remove('active');
-    transcriptBox.textContent = '';
-    transcriptBox.innerHTML = '';
-    currentJobId = null;
-    currentResult = null;
-    isEditMode = false;
-    document.getElementById('editBtn').classList.remove('active');
-    document.getElementById('editBtn').textContent = '✏️ Edit';
-    document.getElementById('editNotice').classList.remove('show');
-    transcriptBox.contentEditable = 'false';
-    transcriptBox.classList.remove('editable');
-  });
-}
-
-// Helper to download files
-function downloadFile(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// Generate Markdown format
-function generateMarkdown() {
-  if (!currentResult) {
-    return transcriptBox.textContent;
-  }
-
-  const now = new Date().toISOString();
-  let md = `---
-title: Transcript
-date: ${now}
-type: transcript
----
-
-# Transcript
-
-`;
-
-  if (currentResult.speakers && currentResult.speakers.length > 0) {
-    md += `**Speakers:** ${currentResult.speakers.join(', ')}\n\n---\n\n`;
-    currentResult.segments.forEach(seg => {
-      md += `**[${seg.timestamp}] ${seg.speaker}:**\n${seg.text}\n\n`;
-    });
-  } else if (currentResult.segments) {
-    currentResult.segments.forEach(seg => {
-      md += `**[${seg.timestamp}]** ${seg.text}\n\n`;
-    });
-  } else {
-    md += currentResult.full_text || transcriptBox.textContent;
-  }
-
-  return md;
-}
-
-// Generate SRT subtitle format
-function generateSRT() {
-  if (!currentResult || !currentResult.segments) {
-    // Fallback: create single subtitle
-    return `1
-00:00:00,000 --> 00:10:00,000
-${transcriptBox.textContent}
-`;
-  }
-
-  let srt = '';
-  currentResult.segments.forEach((seg, index) => {
-    const startTime = parseTimestamp(seg.timestamp);
-    const nextSeg = currentResult.segments[index + 1];
-    const endTime = nextSeg ? parseTimestamp(nextSeg.timestamp) : addSeconds(startTime, 5);
-
-    srt += `${index + 1}\n`;
-    srt += `${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n`;
-    if (seg.speaker) {
-      srt += `[${seg.speaker}] `;
-    }
-    srt += `${seg.text}\n\n`;
-  });
-
-  return srt;
-}
-
-// Generate WebVTT subtitle format
-function generateVTT() {
-  if (!currentResult || !currentResult.segments) {
-    return `WEBVTT
-
-00:00:00.000 --> 00:10:00.000
-${transcriptBox.textContent}
-`;
-  }
-
-  let vtt = 'WEBVTT\n\n';
-  currentResult.segments.forEach((seg, index) => {
-    const startTime = parseTimestamp(seg.timestamp);
-    const nextSeg = currentResult.segments[index + 1];
-    const endTime = nextSeg ? parseTimestamp(nextSeg.timestamp) : addSeconds(startTime, 5);
-
-    vtt += `${formatVTTTime(startTime)} --> ${formatVTTTime(endTime)}\n`;
-    if (seg.speaker) {
-      vtt += `<v ${seg.speaker}>`;
-    }
-    vtt += `${seg.text}\n\n`;
-  });
-
-  return vtt;
-}
-
-// Parse timestamp like "00:00" or "01:23" to seconds
-function parseTimestamp(timestamp) {
-  const parts = timestamp.split(':').map(Number);
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  } else if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-  return 0;
-}
-
-// Add seconds to a time value
-function addSeconds(seconds, add) {
-  return seconds + add;
-}
-
-// Format time for SRT (HH:MM:SS,mmm)
-function formatSRTTime(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-  return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms, 3)}`;
-}
-
-// Format time for VTT (HH:MM:SS.mmm)
-function formatVTTTime(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-  return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms, 3)}`;
-}
-
-function pad(num, size = 2) {
-  return num.toString().padStart(size, '0');
 }
 
 // Get HF token from storage
@@ -410,9 +196,19 @@ async function transcribeFile(file) {
   hideError();
   showProgress('Uploading file...');
 
+  const model = document.getElementById('modelSelect').value;
+
+  // Initialize metadata for this transcription
+  currentMetadata = {
+    source: file.name,
+    source_type: 'file',
+    model: model,
+    processed_at: new Date().toISOString()
+  };
+
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('model', document.getElementById('modelSelect').value);
+  formData.append('model', model);
 
   const hfToken = await getHfToken();
   if (hfToken) {
@@ -450,9 +246,19 @@ async function transcribeUrl(url) {
   hideError();
   showProgress('Downloading audio...');
 
+  const model = document.getElementById('modelSelectUrl').value;
+
+  // Initialize metadata for this transcription
+  currentMetadata = {
+    source: url,
+    source_type: 'url',
+    model: model,
+    processed_at: new Date().toISOString()
+  };
+
   const formData = new FormData();
   formData.append('url', url);
-  formData.append('model', document.getElementById('modelSelectUrl').value);
+  formData.append('model', model);
 
   const hfToken = await getHfToken();
   if (hfToken) {
@@ -693,9 +499,21 @@ async function transcribeRecording(blob) {
   hideError();
   showProgress('Uploading recording...');
 
+  const model = document.getElementById('modelSelectRecord').value;
+  const recordingDuration = recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null;
+
+  // Initialize metadata for this transcription
+  currentMetadata = {
+    source: 'Tab Recording',
+    source_type: 'recording',
+    model: model,
+    duration: recordingDuration,
+    processed_at: new Date().toISOString()
+  };
+
   const formData = new FormData();
   formData.append('file', blob, 'recording.webm');
-  formData.append('model', document.getElementById('modelSelectRecord').value);
+  formData.append('model', model);
 
   const hfToken = await getHfToken();
   if (hfToken) {
@@ -741,6 +559,18 @@ function pollJobStatus() {
       if (job.status === 'completed') {
         clearInterval(pollInterval);
         hideProgress();
+
+        // Enrich metadata from job response
+        if (job.language) {
+          currentMetadata.language = job.language;
+        }
+        if (job.duration) {
+          currentMetadata.duration = job.duration;
+        }
+        if (job.result?.metadata) {
+          currentMetadata = { ...currentMetadata, ...job.result.metadata };
+        }
+
         showResult(job.result);
       } else if (job.status === 'error') {
         clearInterval(pollInterval);
@@ -811,28 +641,15 @@ function hideProgress() {
   progressSection.classList.remove('active');
 }
 
-function showResult(result) {
+async function showResult(result) {
   resultSection.classList.add('active');
   currentResult = result; // Store for export
 
-  if (result.speakers && result.speakers.length > 0) {
-    // Format with speakers
-    let html = `<strong>Speakers:</strong> ${result.speakers.join(', ')}\n\n`;
-    result.segments.forEach(seg => {
-      html += `<span class="timestamp">[${seg.timestamp}]</span> <span class="speaker-label">${seg.speaker}:</span>\n${seg.text}\n\n`;
-    });
-    transcriptBox.innerHTML = html;
-  } else if (result.segments && result.segments.length > 0) {
-    // Format with timestamps
-    let html = '';
-    result.segments.forEach(seg => {
-      html += `<span class="timestamp">[${seg.timestamp}]</span> ${seg.text}\n\n`;
-    });
-    transcriptBox.innerHTML = html;
-  } else {
-    // Plain text
-    transcriptBox.textContent = result.full_text;
-  }
+  // Save transcript data to storage for the transcript page
+  await chrome.storage.local.set({
+    transcriptResult: result,
+    transcriptMetadata: currentMetadata
+  });
 }
 
 // Auto-populate URL field with current tab URL if on a streaming site

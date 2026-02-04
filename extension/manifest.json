@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SpeakToText Local",
-  "version": "1.3.0",
-  "description": "Transcribe audio files, URLs, and tab audio locally with speaker identification. Privacy-focused - all processing happens on your machine.",
+  "version": "1.4.0",
+  "description": "Transform audio into AI-ready data. Transcribe with Whisper, identify speakers, and export to JSON, Markdown, SRT for LLM workflows and knowledge bases.",
   "permissions": [
     "storage",
     "tabCapture",

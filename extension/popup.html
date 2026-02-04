@@ -282,6 +282,44 @@
       display: block;
     }
 
+    .transcript-link {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px;
+      background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+      border: 1px solid #28a745;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #155724;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .transcript-link:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+    }
+
+    .transcript-link-icon {
+      font-size: 32px;
+    }
+
+    .transcript-link-text {
+      flex: 1;
+    }
+
+    .transcript-link-text strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .transcript-link-text span {
+      font-size: 13px;
+      opacity: 0.8;
+    }
+
     .result-header {
       display: flex;
       justify-content: space-between;
@@ -472,7 +510,7 @@
 <body>
   <div class="header">
     <h1>SpeakToText Local</h1>
-    <p>Private audio transcription</p>
+    <p>Transform audio to AI-ready data · v1.4.0</p>
   </div>
 
   <div id="statusBar" class="status-bar disconnected">
@@ -586,25 +624,13 @@
 
   <!-- Result Section -->
   <div id="resultSection" class="result-section">
-    <div class="result-header">
-      <h3>Transcript</h3>
-      <div class="result-actions">
-        <button id="copyBtn">📋 Copy</button>
-        <button id="editBtn">✏️ Edit</button>
-        <div class="export-dropdown">
-          <button id="exportBtn">💾 Export ▾</button>
-          <div class="export-menu" id="exportMenu">
-            <button id="exportTxt">📄 Text (.txt)</button>
-            <button id="exportMd">📝 Markdown (.md)</button>
-            <button id="exportSrt">🎬 Subtitles (.srt)</button>
-            <button id="exportVtt">🎬 WebVTT (.vtt)</button>
-          </div>
-        </div>
-        <button id="clearBtn">🗑️ Clear</button>
+    <a href="#" id="openTranscriptBtn" class="transcript-link">
+      <div class="transcript-link-icon">✅</div>
+      <div class="transcript-link-text">
+        <strong>Transcription complete!</strong>
+        <span>Click here to manage your transcript →</span>
       </div>
-    </div>
-    <div class="transcript-box" id="transcriptBox" spellcheck="false"></div>
-    <div class="edit-notice" id="editNotice">✏️ Edit mode: Make changes directly in the transcript above</div>
+    </a>
   </div>
 
   <div id="updateBanner" class="update-banner" style="display: none;">
