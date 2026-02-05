@@ -25,6 +25,18 @@ echo -e "${GREEN}✓ Ready to start${NC}"
 # Check if virtual environment exists and has dependencies installed
 if [ ! -f "$SCRIPT_DIR/server/venv/bin/activate" ]; then
     echo -e "${YELLOW}⚠️  No virtual environment found. Creating one...${NC}"
+
+    # Check if venv module is available
+    if ! python3 -m venv --help > /dev/null 2>&1; then
+        echo -e "${RED}✗ Python venv module not found${NC}"
+        echo ""
+        echo "Please install the venv module:"
+        echo "  macOS:  (should be included with Python)"
+        echo "  Ubuntu: sudo apt install python3-venv"
+        echo "  Fedora: sudo dnf install python3-venv"
+        exit 1
+    fi
+
     python3 -m venv "$SCRIPT_DIR/server/venv"
     source "$SCRIPT_DIR/server/venv/bin/activate"
     echo "Installing dependencies (this may take a few minutes)..."
