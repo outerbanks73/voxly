@@ -22,16 +22,30 @@ sleep 2
 
 echo -e "${GREEN}✓ Ready to start${NC}"
 
-# Check if virtual environment exists, if not create it
+# Check if virtual environment exists and has dependencies installed
 if [ ! -f "$SCRIPT_DIR/server/venv/bin/activate" ]; then
     echo -e "${YELLOW}⚠️  No virtual environment found. Creating one...${NC}"
     python3 -m venv "$SCRIPT_DIR/server/venv"
     source "$SCRIPT_DIR/server/venv/bin/activate"
-    echo "Installing dependencies..."
+    echo "Installing dependencies (this may take a few minutes)..."
     pip install -r "$SCRIPT_DIR/server/requirements.txt"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}✗ Failed to install dependencies${NC}"
+        exit 1
+    fi
     echo -e "${GREEN}✓ Virtual environment created and dependencies installed${NC}"
 else
     source "$SCRIPT_DIR/server/venv/bin/activate"
+    # Verify fastapi is installed (quick check that deps are present)
+    if ! python -c "import fastapi" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Dependencies missing. Installing...${NC}"
+        pip install -r "$SCRIPT_DIR/server/requirements.txt"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}✗ Failed to install dependencies${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Dependencies installed${NC}"
+    fi
 fi
 
 echo -e "${GREEN}Starting server on http://localhost:$PORT${NC}"
