@@ -68,18 +68,9 @@ echo "✅ Updated from v$CURRENT_VERSION to v$NEW_VERSION"
 echo
 echo "Checking for running server..."
 if pgrep -f "server.py" > /dev/null; then
-    echo "Stopping existing server..."
-    pkill -f "server.py" 2>/dev/null || true
-    sleep 2
-
-    echo "Starting updated server..."
-    cd server
-    if [ -f "venv/bin/activate" ]; then
-        source venv/bin/activate
-    fi
-    python server.py > /dev/null 2>&1 &
-    cd ..
-    sleep 2
+    echo "Restarting server with updates..."
+    ./stop-server.sh
+    ./start-server.sh
     echo "✅ Server restarted"
 else
     echo "Server not running. Start it with: ./start-server.sh"

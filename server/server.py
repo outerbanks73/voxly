@@ -81,17 +81,9 @@ CACHE_MAX_AGE = 24 * 60 * 60  # 24 hours in seconds
 # Path to the worker script
 WORKER_SCRIPT = Path(__file__).parent / "worker.py"
 
-# Find the correct Python interpreter (handle venv)
-def get_python_executable():
-    """Get the Python executable, preferring venv if active."""
-    # Check if we're in a venv
-    venv_python = Path(__file__).parent / "venv" / "bin" / "python"
-    if venv_python.exists():
-        return str(venv_python)
-    # Fall back to current interpreter
-    return sys.executable
-
-PYTHON_EXECUTABLE = get_python_executable()
+# Use the same Python interpreter that's running this server
+# (start-server.sh activates venv before running, so sys.executable is correct)
+PYTHON_EXECUTABLE = sys.executable
 
 # Model processing speeds (real-time multiplier on CPU)
 # e.g., tiny processes 32x faster than real-time
