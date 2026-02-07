@@ -389,6 +389,12 @@ def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[st
         else:
             jobs[job_id]['progress'] = f'Transcribing with {model_name}...'
 
+        # Verify audio file exists before starting worker
+        if not Path(audio_path).exists():
+            raise Exception(f"Audio file not found: {audio_path}")
+
+        print(f"[TRANSCRIBE] Processing: {audio_path}")
+
         # Build command to run worker script
         cmd = [
             PYTHON_EXECUTABLE,
@@ -452,10 +458,10 @@ def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[st
             jobs[job_id]['error_hint'] = 'Your Hugging Face token may be invalid.'
         elif 'access' in error_str or 'denied' in error_str:
             jobs[job_id]['error_hint'] = 'Please accept the model licenses at huggingface.co'
-    finally:
-        # Cleanup temp files
-        if audio_path.startswith(tempfile.gettempdir()) and 'speaktotext_cache' not in audio_path:
-            Path(audio_path).unlink(missing_ok=True)
+        elif 'no such file' in error_str or 'errno 2' in error_str:
+            jobs[job_id]['error_hint'] = 'Audio file was not found. Try again.'
+    # Note: Don't cleanup temp files here - worker.py handles its own cleanup
+    # and cached files (in speaktotext_cache) should persist for reuse
 
 
 def process_transcription_thread(job_id: str, audio_path: str, hf_token: Optional[str], model_name: str):
