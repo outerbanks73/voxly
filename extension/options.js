@@ -150,9 +150,10 @@ function setupEventListeners() {
     checkServerStatus();
   });
 
-  // Test token
+  // Test token - actually verify with the server
   document.getElementById('testTokenBtn').addEventListener('click', async () => {
     const token = tokenInput.value.trim();
+    const statusEl = document.getElementById('tokenStatus');
 
     if (!token) {
       updateTokenStatus('empty');
@@ -166,19 +167,47 @@ function setupEventListeners() {
 
     updateTokenStatus('checking');
 
-    // Simple format validation
-    if (token.length > 10 && token.startsWith('hf_')) {
-      // Token format looks valid
-      updateTokenStatus('valid');
-      const statusEl = document.getElementById('tokenStatus');
-      statusEl.className = 'status-message success';
-      statusEl.textContent = 'Token format is valid! Make sure you accepted both model licenses on Hugging Face.';
-      setTimeout(() => {
-        statusEl.className = 'status-message';
-      }, 5000);
-    } else {
-      updateTokenStatus('invalid');
+    try {
+      // Call the server's verify-token endpoint
+      const formData = new FormData();
+      formData.append('hf_token', token);
+
+      const response = await fetch(`${SERVER_URL}/verify-token`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Server error');
+      }
+
+      const result = await response.json();
+
+      if (result.valid) {
+        updateTokenStatus('valid');
+        statusEl.className = 'status-message success';
+        statusEl.textContent = '✅ Token verified! Model access confirmed.';
+      } else {
+        updateTokenStatus('invalid');
+        statusEl.className = 'status-message error';
+        statusEl.textContent = `❌ ${result.error || 'Token verification failed'}`;
+      }
+    } catch (e) {
+      // Server may not be running - fall back to format check
+      if (token.length > 10 && token.startsWith('hf_')) {
+        updateTokenStatus('valid');
+        statusEl.className = 'status-message success';
+        statusEl.textContent = 'Token format looks valid! Start the server to fully verify model access.';
+      } else {
+        updateTokenStatus('error');
+        statusEl.className = 'status-message error';
+        statusEl.textContent = 'Could not verify token - server not running.';
+      }
     }
+
+    setTimeout(() => {
+      statusEl.className = 'status-message';
+    }, 5000);
   });
 
   // Save storage folder

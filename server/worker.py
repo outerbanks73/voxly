@@ -177,9 +177,14 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
             try:
                 import torch
 
+                # Diagnostic logging for diarization
+                print(f"[DIARIZATION] HF token received: Yes (length: {len(hf_token)})", file=sys.stderr, flush=True)
+                print(f"[DIARIZATION] Token prefix: {hf_token[:10]}...", file=sys.stderr, flush=True)
+
                 # Set token
                 os.environ["HF_TOKEN"] = hf_token
                 os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+                print(f"[DIARIZATION] HF_TOKEN env var set: {'HF_TOKEN' in os.environ}", file=sys.stderr, flush=True)
 
                 # Fix PyTorch 2.6+ weights_only security issue
                 torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
@@ -216,7 +221,9 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
 
                 from pyannote.audio import Pipeline
 
+                print(f"[DIARIZATION] Attempting to load pyannote pipeline...", file=sys.stderr, flush=True)
                 pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+                print(f"[DIARIZATION] Pipeline loaded successfully!", file=sys.stderr, flush=True)
 
                 # Use MPS on Apple Silicon if available
                 if torch.backends.mps.is_available():
@@ -238,9 +245,11 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 formatted['diarization_error'] = None
 
             except Exception as e:
-                # If diarization fails, log error and return without speakers
-                import sys
-                print(f"Diarization failed: {str(e)}", file=sys.stderr)
+                # If diarization fails, log detailed error and return without speakers
+                import traceback
+                print(f"[DIARIZATION] FAILED: {str(e)}", file=sys.stderr, flush=True)
+                print(f"[DIARIZATION] Full traceback:", file=sys.stderr, flush=True)
+                traceback.print_exc(file=sys.stderr)
                 formatted = format_transcript(result['segments'], with_speakers=False)
                 formatted['diarization_status'] = 'failed'
                 formatted['diarization_error'] = str(e)

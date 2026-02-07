@@ -402,13 +402,20 @@ def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[st
             cmd.extend(['--hf-token', hf_token])
 
         # Run worker in subprocess with dynamic timeout
+        # Capture stderr for diagnostic logging
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=timeout
         )
+
+        # Log worker stderr for debugging (especially diarization issues)
+        if result.stderr:
+            for line in result.stderr.strip().split('\n'):
+                if line.strip():
+                    print(f"[WORKER] {line}")
 
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "Transcription failed"
@@ -920,6 +927,46 @@ async def get_settings():
         "storage_folder": settings.get('storage_folder', ''),
         "current_cache_dir": str(CACHE_DIR)
     }
+
+
+@app.post("/verify-token")
+async def verify_token(hf_token: str = Form(...)):
+    """Verify HuggingFace token and check access to diarization model.
+
+    This endpoint tests if the token is valid and has access to the
+    pyannote speaker diarization model.
+    """
+    if not hf_token:
+        return {"valid": False, "error": "No token provided"}
+
+    if not hf_token.startswith('hf_'):
+        return {"valid": False, "error": "Invalid token format (should start with 'hf_')"}
+
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=hf_token)
+
+        # Try to access the diarization model info
+        model_info = api.model_info("pyannote/speaker-diarization-3.1")
+
+        return {
+            "valid": True,
+            "message": "Token valid and model accessible",
+            "model_id": model_info.id,
+            "gated": model_info.gated if hasattr(model_info, 'gated') else None
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "401" in error_msg or "unauthorized" in error_msg.lower():
+            return {"valid": False, "error": "Invalid or expired token"}
+        elif "403" in error_msg or "access" in error_msg.lower():
+            return {
+                "valid": False,
+                "error": "Token valid but model access not granted. Please accept the license at https://huggingface.co/pyannote/speaker-diarization-3.1"
+            }
+        else:
+            return {"valid": False, "error": error_msg}
 
 
 def main():

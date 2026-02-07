@@ -1,5 +1,5 @@
 // Transcript Management Page JavaScript
-// Voxly v1.7.2
+// Voxly v1.8.1
 
 const CURRENT_VERSION = '1.8.1';
 
