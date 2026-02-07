@@ -63,7 +63,7 @@ const STREAMING_SITES = [
 ];
 
 // Current extension version
-const CURRENT_VERSION = '1.6.1';
+const CURRENT_VERSION = '1.6.2';
 const GITHUB_REPO = 'outerbanks73/speaktotext-local'; // TODO: Consider renaming to 'voxly'
 
 // Initialize
@@ -195,7 +195,11 @@ async function transcribeFile(file) {
     return;
   }
 
+  // Clear any stale results before starting new transcription
   hideError();
+  hideResult();
+  currentResult = null;
+  currentMetadata = null;
   showProgress('Uploading file...');
 
   // Use 'base' as default for files (server will handle it)
@@ -237,10 +241,12 @@ async function transcribeFile(file) {
     } else {
       showError('Failed to start transcription');
       hideProgress();
+      hideResult(); // Ensure stale results aren't shown
     }
   } catch (e) {
     showError(`Error: ${e.message}`);
     hideProgress();
+    hideResult(); // Ensure stale results aren't shown
   }
 }
 
@@ -374,7 +380,11 @@ async function extractYoutubeTranscript(url, languageCode = null, preflight = {}
     return;
   }
 
+  // Clear any stale results before starting new extraction
   hideError();
+  hideResult();
+  currentResult = null;
+  currentMetadata = null;
   showProgress('Extracting transcript...');
 
   const formData = new FormData();
@@ -424,6 +434,7 @@ async function extractYoutubeTranscript(url, languageCode = null, preflight = {}
 
   } catch (e) {
     hideProgress();
+    hideResult(); // Ensure stale results aren't shown
     showError(`Transcript extraction failed: ${e.message}`);
   }
 }
@@ -436,7 +447,11 @@ async function transcribeUrl(url) {
     return;
   }
 
+  // Clear any stale results before starting new transcription
   hideError();
+  hideResult();
+  currentResult = null;
+  currentMetadata = null;
   showProgress('Checking video info...');
 
   // Do preflight check to get duration and transcript availability
@@ -511,10 +526,12 @@ async function transcribeUrl(url) {
     } else {
       showError(data.error || 'Failed to start transcription');
       hideProgress();
+      hideResult(); // Ensure stale results aren't shown
     }
   } catch (e) {
     showError(`Error: ${e.message}`);
     hideProgress();
+    hideResult(); // Ensure stale results aren't shown
   }
 }
 
@@ -925,6 +942,11 @@ async function showResult(result) {
     transcriptResult: result,
     transcriptMetadata: currentMetadata
   });
+}
+
+// Hide result section (used when errors occur to prevent showing stale data)
+function hideResult() {
+  resultSection.classList.remove('active');
 }
 
 // Auto-populate URL field with current tab URL

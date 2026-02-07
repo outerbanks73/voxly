@@ -2,12 +2,19 @@
 
 ## Open Bugs
 
+(None currently)
+
+---
+
+## Closed Bugs
+
 ### BUG-001: Stale transcript shown after failed extraction/transcription
 
-**Status:** Open
+**Status:** Fixed in v1.6.2
 **Severity:** High
 **Version Found:** 1.6.1
-**Date:** 2025-02-07
+**Date Found:** 2025-02-07
+**Date Fixed:** 2025-02-07
 
 **Description:**
 When Voxly fails to extract or transcribe a URL, it displays the previous transcript from storage instead of showing an error state. This gives the false impression that the transcription succeeded.
@@ -18,26 +25,13 @@ When Voxly fails to extract or transcribe a URL, it displays the previous transc
 3. Attempt to transcribe
 4. Observe: The previous transcript is displayed instead of an error
 
-**Expected Behavior:**
-- Show clear error message indicating the URL cannot be transcribed
-- Do NOT display any previous transcript data
-- Clear the result area or show empty state
-
 **Root Cause:**
-The `showResult()` function is called even after errors, or `currentResult` is not properly cleared on failure. The UI reads from `chrome.storage.local` which contains stale data.
+The `showResult()` function was not being hidden on errors, and `currentResult` was not cleared at the start of new transcription attempts. The UI read from `chrome.storage.local` which contained stale data.
 
-**Files Involved:**
-- `extension/sidepanel.js` - Error handling in `transcribeUrl()`, `extractYoutubeTranscript()`
-- `extension/transcript.js` - Result display logic
-
-**Proposed Fix:**
-1. Clear `currentResult` and `currentMetadata` at the START of any new transcription attempt
-2. Only call `showResult()` on actual success
-3. On error, explicitly clear the result display area
-4. Consider adding a "source URL" check to prevent showing mismatched transcripts
-
----
-
-## Closed Bugs
-
-(None yet)
+**Fix Applied:**
+1. Added `hideResult()` function to hide the result section
+2. Clear `currentResult` and `currentMetadata` at the START of all transcription functions
+3. Call `hideResult()` on all error paths in:
+   - `transcribeFile()`
+   - `transcribeUrl()`
+   - `extractYoutubeTranscript()`

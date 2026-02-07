@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
-// Voxly v1.6.1
+// Voxly v1.6.2
 
-const CURRENT_VERSION = '1.6.1';
+const CURRENT_VERSION = '1.6.2';
 
 // State
 let currentResult = null;
