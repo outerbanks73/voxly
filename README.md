@@ -110,7 +110,7 @@ The server runs on `http://localhost:5123`
    ```
 2. Open the generated Xcode project:
    ```bash
-   open "safari-extension/SpeakToText Local/SpeakToText Local.xcodeproj"
+   open "safari-extension/Voxly/Voxly.xcodeproj"
    ```
 3. Select your Development Team in Signing & Capabilities
 4. Build and Run (⌘R)
@@ -120,7 +120,7 @@ The server runs on `http://localhost:5123`
 
 ### 5. Use It!
 
-1. Click the SpeakToText Local icon in your browser toolbar
+1. Click the Voxly icon in your browser toolbar
 2. Choose your input method (File, URL, or Record Tab*)
 3. Select a Whisper model
 4. Click Transcribe
