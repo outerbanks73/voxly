@@ -63,7 +63,7 @@ const STREAMING_SITES = [
 ];
 
 // Current extension version
-const CURRENT_VERSION = '1.5.5';
+const CURRENT_VERSION = '1.5.6';
 const GITHUB_REPO = 'outerbanks73/speaktotext-local';
 
 // Initialize
@@ -318,27 +318,13 @@ async function transcribeUrl(url) {
   // Do preflight check to get duration
   const preflight = await preflightCheck(url);
 
-  if (preflight.error || !preflight.duration_seconds) {
-    // Preflight failed - warn user and ask to proceed
-    console.warn('Preflight check failed or no duration:', preflight.error);
-    hideProgress();
-    const proceed = confirm(
-      "Couldn't determine video duration. The transcription may take a while for long videos.\n\n" +
-      "Proceed anyway?"
-    );
-    if (!proceed) {
-      return;
-    }
-    showProgress('Starting transcription...');
-  } else if (preflight.duration_seconds > 1800) {
-    // For videos longer than 30 min, show confirmation dialog
-    hideProgress();
-    const confirmed = await showPreflightDialog(preflight);
-    if (!confirmed) {
-      return; // User cancelled
-    }
-    showProgress('Starting transcription...');
+  // Always show preflight dialog before transcription
+  hideProgress();
+  const confirmed = await showPreflightDialog(preflight);
+  if (!confirmed) {
+    return; // User cancelled
   }
+  showProgress('Starting transcription...');
 
   // Initialize metadata for this transcription
   const model = preflight.recommended_model || 'base';
