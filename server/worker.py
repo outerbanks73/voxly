@@ -101,6 +101,7 @@ def format_transcript(segments: list, with_speakers: bool = False) -> dict:
         current_speaker = None
         current_text = []
         current_start = None
+        current_end = None
 
         for seg in segments:
             speaker = speaker_map.get(seg['speaker'], seg['speaker'])
@@ -110,19 +111,25 @@ def format_transcript(segments: list, with_speakers: bool = False) -> dict:
                     grouped.append({
                         'timestamp': format_timestamp(current_start),
                         'speaker': current_speaker,
-                        'text': ' '.join(current_text)
+                        'text': ' '.join(current_text),
+                        'start': current_start,  # Raw seconds (float) for precision
+                        'end': current_end       # Raw seconds (float) for precision
                     })
                 current_speaker = speaker
                 current_text = [seg['text']]
                 current_start = seg['start']
+                current_end = seg['end']
             else:
                 current_text.append(seg['text'])
+                current_end = seg['end']  # Update end time as we accumulate
 
         if current_speaker and current_text:
             grouped.append({
                 'timestamp': format_timestamp(current_start),
                 'speaker': current_speaker,
-                'text': ' '.join(current_text)
+                'text': ' '.join(current_text),
+                'start': current_start,  # Raw seconds (float) for precision
+                'end': current_end       # Raw seconds (float) for precision
             })
 
         return {
@@ -138,7 +145,9 @@ def format_transcript(segments: list, with_speakers: bool = False) -> dict:
             'segments': [
                 {
                     'timestamp': format_timestamp(seg['start']),
-                    'text': seg['text'].strip()
+                    'text': seg['text'].strip(),
+                    'start': seg['start'],  # Raw seconds (float) for precision
+                    'end': seg['end']       # Raw seconds (float) for precision
                 }
                 for seg in segments
             ],

@@ -636,6 +636,29 @@
     .empty-state p {
       font-size: 14px;
     }
+
+    /* Print-specific styles for PDF export */
+    @media print {
+      .header, .toolbar, .export-menu, .btn, .status-message, .edit-notice, .summary-section {
+        display: none !important;
+      }
+      .transcript-container {
+        padding: 0;
+        margin: 0;
+        max-height: none !important;
+        overflow: visible !important;
+      }
+      body {
+        background: white;
+        padding: 20px;
+      }
+      .container {
+        padding: 0;
+      }
+      .segment {
+        page-break-inside: avoid;
+      }
+    }
   </style>
 </head>
 <body>
@@ -706,6 +729,7 @@
               <button id="exportTxt">📄 Text (.txt)</button>
               <button id="exportSrt">🎬 Subtitles (.srt)</button>
               <button id="exportVtt">🎬 WebVTT (.vtt)</button>
+              <button id="exportPdf">📄 PDF (Print)</button>
             </div>
           </div>
           <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>

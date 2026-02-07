@@ -69,7 +69,7 @@ const STREAMING_SITES = [
 ];
 
 // Current extension version
-const CURRENT_VERSION = '1.7.2';
+const CURRENT_VERSION = '1.7.3';
 const GITHUB_REPO = 'outerbanks73/speaktotext-local'; // TODO: Consider renaming to 'voxly'
 
 // Initialize
@@ -1080,6 +1080,24 @@ function hideProgress() {
 async function showResult(result) {
   resultSection.classList.add('active');
   currentResult = result; // Store for export
+
+  // Generate personalized completion message
+  let displayName = 'Transcription';
+  if (currentMetadata?.title) {
+    displayName = currentMetadata.title.length > 40
+      ? currentMetadata.title.substring(0, 37) + '...'
+      : currentMetadata.title;
+  } else if (currentMetadata?.source) {
+    displayName = currentMetadata.source.length > 40
+      ? currentMetadata.source.substring(0, 37) + '...'
+      : currentMetadata.source;
+  }
+
+  // Update the result message with dynamic text
+  const resultMessage = document.getElementById('resultMessage');
+  if (resultMessage) {
+    resultMessage.textContent = `${displayName} transcribed!`;
+  }
 
   // Save transcript data to storage for the transcript page
   await chrome.storage.local.set({

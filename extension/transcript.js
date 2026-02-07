@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
 // Voxly v1.7.2
 
-const CURRENT_VERSION = '1.7.2';
+const CURRENT_VERSION = '1.7.3';
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -412,6 +412,11 @@ function setupButtons() {
     exportMenu.classList.remove('show');
   });
 
+  document.getElementById('exportPdf').addEventListener('click', () => {
+    exportMenu.classList.remove('show');
+    window.print();
+  });
+
   // Clear button
   clearBtn.addEventListener('click', async () => {
     if (confirm('Are you sure you want to clear the transcript?')) {
@@ -511,11 +516,8 @@ async function getOpenAIApiKey() {
 
 // Handle summarize button click
 async function handleSummarize() {
-  // Check if user is premium
-  if (!await isPremiumUser()) {
-    showUpgradeModal();
-    return;
-  }
+  // Summarization is a baseline feature - freemium gate is usage count only
+  // (checked at transcription time in sidepanel.js)
 
   // Check if we have a transcript
   if (!currentResult?.full_text) {
