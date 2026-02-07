@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
 // Voxly v1.7.2
 
-const CURRENT_VERSION = '1.8.0';
+const CURRENT_VERSION = '1.8.1';
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -37,6 +37,43 @@ let currentMetadata = null;
 let isEditing = false;
 let isEditingMetadata = false;
 let currentFormat = 'paragraph'; // Default to paragraph view
+
+// Toggle collapsible section
+function toggleSection(sectionId) {
+  const section = document.getElementById(sectionId + 'Section');
+  if (section) {
+    section.classList.toggle('expanded');
+  }
+}
+
+// Update preview text for a section
+function updateSummaryPreview() {
+  const summaryContent = document.getElementById('summaryContent');
+  const summaryPreview = document.getElementById('summaryPreview');
+  if (summaryContent && summaryPreview) {
+    const text = summaryContent.textContent || summaryContent.innerText || '';
+    if (text.trim()) {
+      const preview = text.substring(0, 200).trim();
+      summaryPreview.textContent = preview + (text.length > 200 ? '...' : '');
+    } else {
+      summaryPreview.textContent = 'Click to expand and view AI summary...';
+    }
+  }
+}
+
+function updateTranscriptPreview() {
+  const transcriptPreview = document.getElementById('transcriptPreview');
+  if (transcriptPreview && currentResult?.full_text) {
+    const text = currentResult.full_text;
+    const preview = text.substring(0, 200).trim();
+    transcriptPreview.textContent = preview + (text.length > 200 ? '...' : '');
+  } else if (transcriptPreview) {
+    transcriptPreview.textContent = 'Click to expand and view transcript...';
+  }
+}
+
+// Make toggleSection available globally for onclick handlers
+window.toggleSection = toggleSection;
 
 // DOM Elements
 const transcriptContainer = document.getElementById('transcriptContainer');
@@ -86,14 +123,17 @@ async function loadTranscriptData() {
 
         displayMetadata();
         displayTranscript();
+        updateTranscriptLabel();
+        updateTranscriptPreview();
 
         // Display saved summary if available, or auto-generate if not
         if (currentMetadata.summary) {
           const summarySection = document.getElementById('summarySection');
           const summaryContent = document.getElementById('summaryContent');
           if (summarySection && summaryContent) {
-            summarySection.classList.add('active');
+            summarySection.style.display = 'block';
             summaryContent.innerHTML = currentMetadata.summary;
+            updateSummaryPreview();
           }
         } else if (currentResult?.full_text) {
           // Auto-generate summary on load if not already present
@@ -117,19 +157,27 @@ async function autoGenerateSummary() {
 
   const summarySection = document.getElementById('summarySection');
   const summaryContent = document.getElementById('summaryContent');
+  const summaryPreview = document.getElementById('summaryPreview');
 
-  summarySection.classList.add('active');
+  summarySection.style.display = 'block';
   summaryContent.innerHTML = '<div class="summary-loading"><div class="spinner"></div>Generating AI Summary...</div>';
+  if (summaryPreview) {
+    summaryPreview.textContent = 'Generating AI Summary...';
+  }
 
   try {
     const summary = await generateSummary(apiKey, currentResult.full_text);
     summaryContent.innerHTML = summary;
     currentMetadata.summary = summary;
     await chrome.storage.local.set({ transcriptMetadata: currentMetadata });
+    updateSummaryPreview();
     showStatus('AI Summary generated!', 'success');
   } catch (e) {
     console.error('[Voxly] Auto-summary failed:', e);
-    summaryContent.textContent = 'Failed to generate summary. Click Summarize to try again.';
+    summaryContent.textContent = 'Failed to generate summary. Click Regenerate Summary to try again.';
+    if (summaryPreview) {
+      summaryPreview.textContent = 'Summary generation failed. Click to expand...';
+    }
   }
 }
 

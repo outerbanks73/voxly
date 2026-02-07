@@ -693,6 +693,82 @@
       display: flex;
       gap: 8px;
     }
+
+    /* Collapsible sections */
+    .content-section {
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      background: white;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #f8f9fa;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .section-header:hover {
+      background: #e9ecef;
+    }
+
+    .section-header h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .expand-icon {
+      transition: transform 0.3s;
+      color: #666;
+    }
+
+    .content-section.expanded .expand-icon {
+      transform: rotate(180deg);
+    }
+
+    .section-preview {
+      padding: 12px 16px;
+      max-height: 80px;
+      overflow: hidden;
+      color: #666;
+      font-size: 14px;
+      line-height: 1.6;
+      border-top: 1px solid #eee;
+    }
+
+    .content-section.expanded .section-preview {
+      display: none;
+    }
+
+    .section-full-content {
+      display: none;
+      padding: 16px;
+      max-height: 400px;
+      overflow-y: auto;
+      border-top: 1px solid #eee;
+    }
+
+    .content-section.expanded .section-full-content {
+      display: block;
+    }
+
+    .section-actions {
+      display: none;
+      padding: 12px 16px;
+      border-top: 1px solid #e0e0e0;
+      background: #f8f9fa;
+      gap: 8px;
+    }
+
+    .content-section.expanded .section-actions {
+      display: flex;
+    }
   </style>
 </head>
 <body>
@@ -700,7 +776,7 @@
     <div class="header">
       <div>
         <h1>⚡ Voxly Transcript</h1>
-        <p>Manage and export your transcription · v1.7.0</p>
+        <p>Manage and export your transcription · v1.8.0</p>
       </div>
     </div>
 
@@ -752,9 +828,7 @@
         </div>
 
         <div class="action-bar">
-          <button class="btn btn-primary" id="copyBtn">📋 Copy</button>
-          <button class="btn btn-primary" id="summarizeBtn">✨ Summarize</button>
-          <button class="btn btn-secondary" id="editBtn">✏️ Edit</button>
+          <button class="btn btn-primary" id="summarizeBtn">✨ Regenerate Summary</button>
           <div class="export-dropdown">
             <button class="btn btn-secondary" id="exportBtn">💾 Export ▾</button>
             <div class="export-menu" id="exportMenu">
@@ -770,29 +844,43 @@
         </div>
       </div>
 
-      <!-- Summary Section -->
-      <div id="summarySection" class="summary-section">
-        <div class="summary-header">
+      <!-- AI Summary Section (Collapsible) -->
+      <div id="summarySection" class="content-section" style="display: none;">
+        <div class="section-header" onclick="toggleSection('summary')">
           <h3>📝 AI Summary</h3>
-          <div class="summary-actions">
-            <button class="btn btn-secondary" id="editSummaryBtn" style="padding: 8px 12px; font-size: 12px;">✏️ Edit</button>
-            <button class="btn btn-secondary" id="copySummaryBtn" style="padding: 8px 12px; font-size: 12px;">Copy</button>
-          </div>
+          <span class="expand-icon">▼</span>
         </div>
-        <div id="summaryContent" class="summary-content"></div>
+        <div class="section-preview" id="summaryPreview">
+          Click to expand and view full AI summary...
+        </div>
+        <div class="section-full-content" id="summaryContent"></div>
+        <div class="section-actions">
+          <button class="btn btn-secondary" id="editSummaryBtn">✏️ Edit</button>
+          <button class="btn btn-secondary" id="copySummaryBtn">📋 Copy</button>
+        </div>
       </div>
 
-      <!-- Transcript Section -->
-      <div class="transcript-section">
-        <div class="transcript-header">
+      <!-- Transcript Section (Collapsible) -->
+      <div id="transcriptSection" class="content-section">
+        <div class="section-header" onclick="toggleSection('transcript')">
           <h3 id="transcriptLabel">📄 Regular</h3>
+          <span class="expand-icon">▼</span>
         </div>
-        <div class="transcript-container" id="transcriptContainer">
-          <div class="empty-state" id="emptyState">
-            <div class="icon">📭</div>
-            <h2>No transcript available</h2>
-            <p>Complete a transcription from the extension to see it here.</p>
+        <div class="section-preview" id="transcriptPreview">
+          Click to expand and view full transcript...
+        </div>
+        <div class="section-full-content">
+          <div class="transcript-container" id="transcriptContainer">
+            <div class="empty-state" id="emptyState">
+              <div class="icon">📭</div>
+              <h2>No transcript available</h2>
+              <p>Complete a transcription from the extension to see it here.</p>
+            </div>
           </div>
+        </div>
+        <div class="section-actions">
+          <button class="btn btn-secondary" id="editBtn">✏️ Edit</button>
+          <button class="btn btn-primary" id="copyBtn">📋 Copy</button>
         </div>
       </div>
 
