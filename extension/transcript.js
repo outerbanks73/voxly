@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
 // Voxly v1.7.2
 
-const CURRENT_VERSION = '1.7.3';
+const CURRENT_VERSION = '1.7.4';
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -58,6 +58,12 @@ async function loadTranscriptData() {
       if (result.transcriptResult) {
         currentResult = result.transcriptResult;
         currentMetadata = result.transcriptMetadata || {};
+
+        // Debug logging for diarization troubleshooting
+        console.log('[Voxly] Diarization status:', currentResult?.diarization_status);
+        console.log('[Voxly] Diarization error:', currentResult?.diarization_error);
+        console.log('[Voxly] Speakers found:', currentResult?.speakers);
+
         displayMetadata();
         displayTranscript();
 
@@ -272,11 +278,22 @@ function displayMetadata() {
     metaPublisher.style.opacity = '0.5';
   }
 
-  // Participants (speakers)
+  // Participants (speakers) - show diarization status if no speakers
   if (currentResult?.speakers && currentResult.speakers.length > 0) {
     metaParticipants.textContent = currentResult.speakers.join(', ');
+    metaParticipants.style.color = '';
+    metaParticipants.style.opacity = '';
+  } else if (currentResult?.diarization_status === 'failed') {
+    metaParticipants.textContent = `Detection failed: ${currentResult.diarization_error || 'Unknown error'}`;
+    metaParticipants.style.color = '#e74c3c';
+    metaParticipants.style.opacity = '';
+  } else if (currentResult?.diarization_status === 'skipped') {
+    metaParticipants.textContent = 'Add HF token in Settings for speaker detection';
+    metaParticipants.style.color = '#666';
+    metaParticipants.style.opacity = '';
   } else {
     metaParticipants.textContent = 'Add participants...';
+    metaParticipants.style.color = '';
     metaParticipants.style.opacity = '0.5';
   }
 

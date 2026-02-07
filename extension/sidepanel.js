@@ -20,6 +20,7 @@ let currentResult = null; // Store the result for export
 let currentMetadata = null; // Store metadata for enriched exports
 let realtimeSessionId = null;
 let realtimeChunkInterval = null;
+let realtimeChunkCount = 0;
 let isRealtimeMode = false;
 
 // DOM Elements
@@ -69,7 +70,7 @@ const STREAMING_SITES = [
 ];
 
 // Current extension version
-const CURRENT_VERSION = '1.7.3';
+const CURRENT_VERSION = '1.7.4';
 const GITHUB_REPO = 'outerbanks73/speaktotext-local'; // TODO: Consider renaming to 'voxly'
 
 // Initialize
@@ -736,11 +737,16 @@ async function startRecording() {
     }
 
     // Start timer
+    realtimeChunkCount = 0; // Reset chunk counter
     recordingTimer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
       const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
       const secs = (elapsed % 60).toString().padStart(2, '0');
-      document.getElementById('recordingTime').textContent = `${mins}:${secs}`;
+      const timeDisplay = `${mins}:${secs}`;
+      // Show chunk count in real-time mode
+      document.getElementById('recordingTime').textContent = isRealtimeMode
+        ? `${timeDisplay} (${realtimeChunkCount} chunks)`
+        : timeDisplay;
     }, 1000);
 
   } catch (e) {
@@ -803,6 +809,7 @@ async function startRealtimeSession(stream) {
 
           const result = await response.json();
           if (result.transcript) {
+            realtimeChunkCount++;
             updateRealtimeTranscript(result.all_transcripts);
           }
         } catch (e) {
@@ -820,7 +827,10 @@ async function startRealtimeSession(stream) {
 function updateRealtimeTranscript(transcripts) {
   const container = document.getElementById('realtimeTranscript');
   if (transcripts && transcripts.length > 0) {
-    container.textContent = transcripts.join(' ');
+    // Show each chunk as a separate block for better visual feedback
+    container.innerHTML = transcripts.map((t, i) =>
+      `<div style="margin-bottom: 8px; padding: 4px 0; border-bottom: 1px solid #eee;">${t}</div>`
+    ).join('');
     container.scrollTop = container.scrollHeight;
   }
 }
@@ -1093,10 +1103,20 @@ async function showResult(result) {
       : currentMetadata.source;
   }
 
+  // Add diarization status to completion message
+  let statusSuffix = '';
+  if (result.diarization_status === 'failed') {
+    statusSuffix = ' (speaker detection failed)';
+  } else if (result.diarization_status === 'skipped') {
+    statusSuffix = ' (no HF token)';
+  } else if (result.diarization_status === 'success' && result.speakers?.length > 0) {
+    statusSuffix = ` (${result.speakers.length} speaker${result.speakers.length > 1 ? 's' : ''})`;
+  }
+
   // Update the result message with dynamic text
   const resultMessage = document.getElementById('resultMessage');
   if (resultMessage) {
-    resultMessage.textContent = `${displayName} transcribed!`;
+    resultMessage.textContent = `${displayName} transcribed${statusSuffix}`;
   }
 
   // Save transcript data to storage for the transcript page
