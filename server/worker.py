@@ -189,13 +189,17 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 # Fix PyTorch 2.6+ weights_only security issue
                 torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
 
-                # Monkey-patch huggingface_hub
+                # Monkey-patch huggingface_hub to ensure token is always passed
                 import huggingface_hub
                 original_hf_hub_download = huggingface_hub.hf_hub_download
 
                 def patched_hf_hub_download(*args, **kwargs):
+                    # Convert deprecated use_auth_token to token
                     if 'use_auth_token' in kwargs:
                         kwargs['token'] = kwargs.pop('use_auth_token')
+                    # Inject token if not provided (pyannote may not pass it)
+                    if 'token' not in kwargs or kwargs.get('token') is None:
+                        kwargs['token'] = hf_token
                     return original_hf_hub_download(*args, **kwargs)
 
                 huggingface_hub.hf_hub_download = patched_hf_hub_download
@@ -222,7 +226,11 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 from pyannote.audio import Pipeline
 
                 print(f"[DIARIZATION] Attempting to load pyannote pipeline...", file=sys.stderr, flush=True)
-                pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+                # Pass token explicitly to ensure authentication
+                pipeline = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
+                    use_auth_token=hf_token
+                )
                 print(f"[DIARIZATION] Pipeline loaded successfully!", file=sys.stderr, flush=True)
 
                 # Use MPS on Apple Silicon if available

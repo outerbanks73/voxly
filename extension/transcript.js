@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
-// Voxly v1.8.5
+// Voxly v1.8.6
 
-const CURRENT_VERSION = '1.8.5';
+const CURRENT_VERSION = '1.8.6';
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID

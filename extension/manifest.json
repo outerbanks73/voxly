@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Voxly - Instant Transcripts",
   "short_name": "Voxly",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "description": "Transform audio & video into AI-ready transcripts. Instant YouTube extraction or local Whisper transcription. Export to JSON, Markdown, SRT.",
   "permissions": [
     "storage",

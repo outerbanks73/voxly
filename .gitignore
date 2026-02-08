@@ -31,3 +31,5 @@ build/
 
 # Icon generator script
 extension/icons/create_icons.py
+node_modules/
+package-lock.json
