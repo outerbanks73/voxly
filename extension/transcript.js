@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
-// Voxly v1.8.4
+// Voxly v1.8.5
 
-const CURRENT_VERSION = '1.8.4';
+const CURRENT_VERSION = '1.8.5';
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -406,26 +406,20 @@ function displayMetadata() {
     metaPublisher.style.opacity = '0.5';
   }
 
-  // Participants (speakers) - show diarization status if no speakers
+  // Participants (speakers) - only show if speakers detected, hide otherwise
+  const participantsRow = document.getElementById('participantsRow');
   if (currentResult?.speakers && currentResult.speakers.length > 0) {
     metaParticipants.textContent = currentResult.speakers.join(', ');
     metaParticipants.style.color = '';
     metaParticipants.style.opacity = '';
-  } else if (currentResult?.diarization_status === 'failed') {
-    // Show simple message instead of full error - user can check Settings for details
-    metaParticipants.textContent = 'Speaker detection unavailable';
-    metaParticipants.style.color = '#999';
-    metaParticipants.style.opacity = '';
-    // Log the actual error for debugging
-    console.log('[Voxly] Diarization error:', currentResult.diarization_error);
-  } else if (currentResult?.diarization_status === 'skipped') {
-    metaParticipants.textContent = 'Add HF token in Settings for speaker detection';
-    metaParticipants.style.color = '#666';
-    metaParticipants.style.opacity = '';
+    if (participantsRow) participantsRow.style.display = '';
   } else {
-    metaParticipants.textContent = 'Add participants...';
-    metaParticipants.style.color = '';
-    metaParticipants.style.opacity = '0.5';
+    // Hide the participants row if no speakers detected (failed, skipped, or none)
+    if (participantsRow) participantsRow.style.display = 'none';
+    // Log for debugging
+    if (currentResult?.diarization_status === 'failed') {
+      console.log('[Voxly] Diarization failed:', currentResult.diarization_error);
+    }
   }
 
   // Recorded date
