@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
-// Voxly v1.8.3
+// Voxly v1.8.4
 
-const CURRENT_VERSION = '1.8.3';
+const CURRENT_VERSION = '1.8.4';
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -412,9 +412,12 @@ function displayMetadata() {
     metaParticipants.style.color = '';
     metaParticipants.style.opacity = '';
   } else if (currentResult?.diarization_status === 'failed') {
-    metaParticipants.textContent = `Detection failed: ${currentResult.diarization_error || 'Unknown error'}`;
-    metaParticipants.style.color = '#e74c3c';
+    // Show simple message instead of full error - user can check Settings for details
+    metaParticipants.textContent = 'Speaker detection unavailable';
+    metaParticipants.style.color = '#999';
     metaParticipants.style.opacity = '';
+    // Log the actual error for debugging
+    console.log('[Voxly] Diarization error:', currentResult.diarization_error);
   } else if (currentResult?.diarization_status === 'skipped') {
     metaParticipants.textContent = 'Add HF token in Settings for speaker detection';
     metaParticipants.style.color = '#666';
