@@ -776,6 +776,221 @@
     .content-section.expanded .section-actions {
       display: flex;
     }
+
+    /* Share Modal */
+    .share-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+
+    .share-modal-content {
+      background: white;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 480px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .share-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px 0;
+    }
+
+    .share-modal-header h2 {
+      font-size: 18px;
+      color: #1a1a1a;
+    }
+
+    .share-close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #6b6b6b;
+      padding: 0 4px;
+    }
+
+    .share-section {
+      padding: 16px 24px;
+      border-bottom: 1px solid #e8f0f8;
+    }
+
+    .share-section:last-child {
+      border-bottom: none;
+      padding-bottom: 24px;
+    }
+
+    .share-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .share-section h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 4px;
+    }
+
+    .share-description {
+      font-size: 12px;
+      color: #6b6b6b;
+      margin-bottom: 12px;
+    }
+
+    .share-link-container {
+      display: flex;
+      gap: 8px;
+    }
+
+    .share-link-container input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d4e4f4;
+      border-radius: 6px;
+      font-size: 12px;
+      background: #f8fafc;
+    }
+
+    .share-invite-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .share-invite-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d4e4f4;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .share-invite-row select {
+      padding: 8px;
+      border: 1px solid #d4e4f4;
+      border-radius: 6px;
+      font-size: 13px;
+      background: white;
+    }
+
+    .share-invite-row .btn {
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+
+    .share-status {
+      font-size: 12px;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+
+    .share-status.success { color: #155724; }
+    .share-status.error { color: #721c24; }
+
+    /* Toggle switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #ccc;
+      border-radius: 24px;
+      transition: 0.3s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: #0080FF;
+    }
+
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(20px);
+    }
+
+    /* Active shares list */
+    .active-shares-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .share-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: #f8fafc;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .share-item-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .share-item-email {
+      font-weight: 500;
+    }
+
+    .share-item-perm {
+      font-size: 11px;
+      color: #6b6b6b;
+    }
+
+    .share-revoke-btn {
+      background: none;
+      border: 1px solid #dc3545;
+      color: #dc3545;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .share-revoke-btn:hover {
+      background: #dc3545;
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -842,6 +1057,7 @@
             </div>
           </div>
           <button class="btn btn-secondary" id="saveCloudBtn" style="display: none;">☁️ Save to Cloud</button>
+          <button class="btn btn-secondary" id="shareBtn" style="display: none;">🔗 Share</button>
           <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
         </div>
       </div>
@@ -893,6 +1109,53 @@
 
       <div class="edit-notice" id="editNotice">
         ✏️ Edit mode: Make changes directly in the transcript above. Click "Edit" again to save.
+      </div>
+    </div>
+  </div>
+
+  <!-- Share Modal -->
+  <div id="shareModal" class="share-modal" style="display: none;">
+    <div class="share-modal-content">
+      <div class="share-modal-header">
+        <h2>Share Transcript</h2>
+        <button class="share-close-btn" id="closeShareModal">&times;</button>
+      </div>
+
+      <!-- Public Link -->
+      <div class="share-section">
+        <div class="share-section-header">
+          <h3>Public Link</h3>
+          <label class="toggle-switch">
+            <input type="checkbox" id="publicToggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="share-description">Anyone with the link can view this transcript.</p>
+        <div id="publicLinkContainer" class="share-link-container" style="display: none;">
+          <input type="text" id="publicLinkInput" readonly>
+          <button class="btn btn-secondary" id="copyLinkBtn">Copy</button>
+        </div>
+      </div>
+
+      <!-- Share with User -->
+      <div class="share-section">
+        <h3>Share with User</h3>
+        <p class="share-description">Invite someone by email address.</p>
+        <div class="share-invite-row">
+          <input type="email" id="shareEmailInput" placeholder="user@example.com">
+          <select id="sharePermission">
+            <option value="read">View only</option>
+            <option value="write">Can edit</option>
+          </select>
+          <button class="btn btn-primary" id="shareInviteBtn">Share</button>
+        </div>
+        <div id="shareInviteStatus" class="share-status"></div>
+      </div>
+
+      <!-- Active Shares -->
+      <div class="share-section" id="activeSharesSection" style="display: none;">
+        <h3>Shared With</h3>
+        <div id="activeSharesList" class="active-shares-list"></div>
       </div>
     </div>
   </div>

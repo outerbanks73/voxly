@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voxly - Shared Transcript</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f8fafc;
+      color: #1a1a1a;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #0080FF 0%, #0066CC 100%);
+      color: white;
+      padding: 24px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .header p {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .content {
+      padding: 24px;
+    }
+
+    .metadata {
+      background: #f8fafc;
+      border: 1px solid #d4e4f4;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .meta-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #0080FF;
+      margin-bottom: 12px;
+    }
+
+    .meta-grid {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: #6b6b6b;
+    }
+
+    .meta-grid span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .transcript-box {
+      background: #f8fafc;
+      border: 1px solid #d4e4f4;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 200px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-size: 15px;
+      line-height: 1.8;
+    }
+
+    .paragraph {
+      margin-bottom: 20px;
+    }
+
+    .paragraph:last-child {
+      margin-bottom: 0;
+    }
+
+    .paragraph-header {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .paragraph-speaker {
+      font-weight: 700;
+      color: #0080FF;
+    }
+
+    .paragraph-time {
+      color: #888;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 60px;
+      color: #6b6b6b;
+    }
+
+    .loading .spinner {
+      display: inline-block;
+      width: 32px;
+      height: 32px;
+      border: 3px solid #d4e4f4;
+      border-top-color: #0080FF;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .error-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b6b6b;
+    }
+
+    .error-state .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .error-state h2 {
+      font-size: 18px;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+    }
+
+    .branding {
+      text-align: center;
+      padding: 20px;
+      font-size: 13px;
+      color: #6b6b6b;
+      border-top: 1px solid #d4e4f4;
+    }
+
+    .branding a {
+      color: #0080FF;
+      text-decoration: none;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⚡ Voxly Transcript</h1>
+      <p>Shared transcript</p>
+    </div>
+
+    <div class="content">
+      <div id="loadingState" class="loading">
+        <div class="spinner"></div>
+        <div>Loading transcript...</div>
+      </div>
+
+      <div id="errorState" class="error-state" style="display: none;">
+        <div class="icon">🔒</div>
+        <h2 id="errorTitle">Transcript not found</h2>
+        <p id="errorText">This transcript may have been removed or the link is no longer valid.</p>
+      </div>
+
+      <div id="transcriptContent" style="display: none;">
+        <div class="metadata" id="metadataSection">
+          <div class="meta-title" id="shareTitle"></div>
+          <div class="meta-grid">
+            <span id="shareDuration"></span>
+            <span id="shareWords"></span>
+            <span id="shareLanguage"></span>
+            <span id="shareDate"></span>
+          </div>
+        </div>
+
+        <div class="transcript-box" id="transcriptBox"></div>
+      </div>
+    </div>
+
+    <div class="branding">
+      Transcribed with <a href="https://github.com/outerbanks73/speaktotext-local" target="_blank">Voxly</a>
+    </div>
+  </div>
+
+  <script src="lib/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="share.js"></script>
+</body>
+</html>

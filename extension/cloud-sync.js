@@ -150,6 +150,97 @@ async function fetchSharedTranscripts(page = 1, pageSize = 20) {
   return { data: data || [], count: count || 0 };
 }
 
+// Toggle public sharing on a transcript
+async function togglePublicShare(transcriptId, makePublic) {
+  const sb = getSupabase();
+
+  if (makePublic) {
+    // Generate a random share token
+    const token = crypto.randomUUID().replace(/-/g, '').substring(0, 16);
+    const { error } = await sb.from('transcripts')
+      .update({ is_public: true, share_token: token })
+      .eq('id', transcriptId);
+    if (error) throw error;
+    return token;
+  } else {
+    const { error } = await sb.from('transcripts')
+      .update({ is_public: false, share_token: null })
+      .eq('id', transcriptId);
+    if (error) throw error;
+    return null;
+  }
+}
+
+// Share a transcript with another user by email
+async function shareTranscriptWithUser(transcriptId, email, permission = 'read') {
+  const sb = getSupabase();
+  const currentUser = await getCloudUser();
+  if (!currentUser) throw new Error('Not authenticated');
+
+  // Look up the target user by email in profiles
+  const { data: profile, error: lookupError } = await sb
+    .from('profiles')
+    .select('id')
+    .eq('email', email)
+    .single();
+
+  if (lookupError || !profile) {
+    throw new Error('User not found. They must have a Voxly cloud account.');
+  }
+
+  if (profile.id === currentUser.id) {
+    throw new Error('You cannot share with yourself.');
+  }
+
+  const { error } = await sb.from('transcript_shares').upsert({
+    transcript_id: transcriptId,
+    shared_by: currentUser.id,
+    shared_with: profile.id,
+    permission: permission
+  }, { onConflict: 'transcript_id,shared_with' });
+
+  if (error) throw error;
+}
+
+// Get active shares for a transcript
+async function getTranscriptShares(transcriptId) {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from('transcript_shares')
+    .select(`
+      id,
+      shared_with,
+      permission,
+      created_at,
+      profile:profiles!transcript_shares_shared_with_fkey (display_name, email)
+    `)
+    .eq('transcript_id', transcriptId);
+
+  if (error) throw error;
+  return data || [];
+}
+
+// Revoke a share
+async function revokeTranscriptShare(shareId) {
+  const sb = getSupabase();
+  const { error } = await sb.from('transcript_shares').delete().eq('id', shareId);
+  if (error) throw error;
+}
+
+// Fetch a public transcript by share token (no auth required)
+async function fetchPublicTranscript(shareToken) {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from('transcripts')
+    .select('*')
+    .eq('share_token', shareToken)
+    .eq('is_public', true)
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 // Fetch a single transcript by ID
 async function fetchCloudTranscript(transcriptId) {
   const sb = getSupabase();

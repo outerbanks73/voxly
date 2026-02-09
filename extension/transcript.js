@@ -130,6 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupButtons();
   setupFormatToggle();
   setupCloudSaveButton();
+  setupShareButton();
 });
 
 // Load transcript data from storage or cloud
@@ -1297,4 +1298,185 @@ async function setupCloudSaveButton() {
       saveBtn.disabled = false;
     }
   });
+}
+
+// ============================================================
+// Sharing
+// ============================================================
+
+// Setup share button (only for cloud transcripts)
+function setupShareButton() {
+  const shareBtn = document.getElementById('shareBtn');
+  if (!shareBtn) return;
+
+  // Only show share button for cloud transcripts
+  if (!cloudTranscriptId) {
+    shareBtn.style.display = 'none';
+    return;
+  }
+
+  shareBtn.style.display = 'inline-flex';
+
+  shareBtn.addEventListener('click', () => {
+    openShareModal();
+  });
+
+  // Close modal
+  const closeBtn = document.getElementById('closeShareModal');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeShareModal);
+  }
+
+  const modal = document.getElementById('shareModal');
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeShareModal();
+    });
+  }
+
+  // Public toggle
+  document.getElementById('publicToggle').addEventListener('change', handlePublicToggle);
+
+  // Share invite
+  document.getElementById('shareInviteBtn').addEventListener('click', handleShareInvite);
+
+  // Copy link
+  document.getElementById('copyLinkBtn').addEventListener('click', async () => {
+    const input = document.getElementById('publicLinkInput');
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showStatus('Link copied!', 'success');
+    } catch (e) {
+      showStatus('Failed to copy link', 'error');
+    }
+  });
+}
+
+async function openShareModal() {
+  const modal = document.getElementById('shareModal');
+  modal.style.display = 'flex';
+
+  // Load current share state
+  try {
+    const transcript = await fetchCloudTranscript(cloudTranscriptId);
+    const toggle = document.getElementById('publicToggle');
+    const linkContainer = document.getElementById('publicLinkContainer');
+    const linkInput = document.getElementById('publicLinkInput');
+
+    toggle.checked = transcript.is_public;
+    if (transcript.is_public && transcript.share_token) {
+      linkContainer.style.display = 'flex';
+      linkInput.value = `${SUPABASE_URL.replace('.supabase.co', '')}.share.voxly.app/t/${transcript.share_token}`;
+    } else {
+      linkContainer.style.display = 'none';
+    }
+
+    // Load active shares
+    await loadActiveShares();
+  } catch (e) {
+    console.error('[Voxly] Failed to load share state:', e);
+  }
+}
+
+function closeShareModal() {
+  document.getElementById('shareModal').style.display = 'none';
+}
+
+async function handlePublicToggle(e) {
+  const makePublic = e.target.checked;
+  const linkContainer = document.getElementById('publicLinkContainer');
+  const linkInput = document.getElementById('publicLinkInput');
+
+  try {
+    const token = await togglePublicShare(cloudTranscriptId, makePublic);
+    if (makePublic && token) {
+      linkContainer.style.display = 'flex';
+      linkInput.value = `${SUPABASE_URL.replace('.supabase.co', '')}.share.voxly.app/t/${token}`;
+      showStatus('Public link enabled!', 'success');
+    } else {
+      linkContainer.style.display = 'none';
+      showStatus('Public link disabled', 'success');
+    }
+  } catch (e) {
+    e.target.checked = !makePublic; // Revert toggle
+    showStatus(`Failed: ${e.message}`, 'error');
+  }
+}
+
+async function handleShareInvite() {
+  const emailInput = document.getElementById('shareEmailInput');
+  const permSelect = document.getElementById('sharePermission');
+  const statusEl = document.getElementById('shareInviteStatus');
+  const email = emailInput.value.trim();
+
+  if (!email) {
+    statusEl.className = 'share-status error';
+    statusEl.textContent = 'Enter an email address.';
+    return;
+  }
+
+  try {
+    await shareTranscriptWithUser(cloudTranscriptId, email, permSelect.value);
+    statusEl.className = 'share-status success';
+    statusEl.textContent = `Shared with ${email}!`;
+    emailInput.value = '';
+    await loadActiveShares();
+  } catch (e) {
+    statusEl.className = 'share-status error';
+    statusEl.textContent = e.message;
+  }
+
+  setTimeout(() => { statusEl.textContent = ''; }, 5000);
+}
+
+async function loadActiveShares() {
+  const section = document.getElementById('activeSharesSection');
+  const list = document.getElementById('activeSharesList');
+
+  try {
+    const shares = await getTranscriptShares(cloudTranscriptId);
+    if (shares.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    list.innerHTML = '';
+
+    shares.forEach(share => {
+      const item = document.createElement('div');
+      item.className = 'share-item';
+
+      const displayName = share.profile?.display_name || share.profile?.email || 'Unknown';
+      const email = share.profile?.email || '';
+
+      item.innerHTML = `
+        <div class="share-item-info">
+          <span class="share-item-email">${escapeHtmlForShare(displayName)}</span>
+          <span class="share-item-perm">${email} &middot; ${share.permission === 'write' ? 'Can edit' : 'View only'}</span>
+        </div>
+        <button class="share-revoke-btn" data-share-id="${share.id}">Revoke</button>
+      `;
+
+      item.querySelector('.share-revoke-btn').addEventListener('click', async () => {
+        try {
+          await revokeTranscriptShare(share.id);
+          showStatus('Share revoked', 'success');
+          await loadActiveShares();
+        } catch (e) {
+          showStatus(`Failed: ${e.message}`, 'error');
+        }
+      });
+
+      list.appendChild(item);
+    });
+  } catch (e) {
+    console.error('[Voxly] Failed to load shares:', e);
+  }
+}
+
+function escapeHtmlForShare(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
