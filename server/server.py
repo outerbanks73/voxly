@@ -570,6 +570,19 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/auth/token")
+async def get_auth_token(request: Request):
+    """Return auth token to Chrome extensions for auto-configuration.
+
+    Only responds to requests with a chrome-extension:// Origin header,
+    which browsers enforce and web pages cannot spoof.
+    """
+    origin = request.headers.get("Origin", "")
+    if not origin.startswith("chrome-extension://"):
+        raise HTTPException(status_code=403, detail="Only Chrome extensions can auto-fetch the token")
+    return {"token": AUTH_TOKEN}
+
+
 @app.post("/transcribe/file")
 async def transcribe_file(
     file: UploadFile = File(...),

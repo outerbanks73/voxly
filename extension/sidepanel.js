@@ -397,6 +397,11 @@ async function preflightCheck(url) {
       body: formData
     });
 
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      return { error: `Server returned ${response.status}: ${errorText}` };
+    }
+
     return await response.json();
   } catch (e) {
     console.error('Preflight check failed:', e);
@@ -600,6 +605,12 @@ async function transcribeUrl(url) {
 
   // Do preflight check to get duration and transcript availability
   const preflight = await preflightCheck(url);
+
+  if (preflight.error) {
+    hideProgress();
+    showError(preflight.error);
+    return;
+  }
 
   // Always show preflight dialog before transcription
   hideProgress();
