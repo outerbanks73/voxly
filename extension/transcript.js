@@ -49,6 +49,7 @@ let currentMetadata = null;
 let isEditing = false;
 let isEditingMetadata = false;
 let currentFormat = 'paragraph'; // Default to paragraph view
+let cloudTranscriptId = null; // Set when viewing a cloud transcript
 
 // Toggle collapsible section
 function toggleSection(sectionId) {
@@ -128,10 +129,64 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadTranscriptData();
   setupButtons();
   setupFormatToggle();
+  setupCloudSaveButton();
 });
 
-// Load transcript data from storage
+// Load transcript data from storage or cloud
 async function loadTranscriptData() {
+  // Check for cloud transcript ID in URL
+  const params = new URLSearchParams(window.location.search);
+  const cloudId = params.get('id');
+
+  if (cloudId) {
+    try {
+      const data = await fetchCloudTranscript(cloudId);
+      if (data) {
+        cloudTranscriptId = data.id;
+        currentResult = {
+          full_text: data.full_text,
+          segments: data.segments || [],
+          speakers: data.speakers || [],
+          diarization_status: data.diarization_status
+        };
+        currentMetadata = {
+          title: data.title,
+          source: data.source,
+          source_type: data.source_type,
+          uploader: data.uploader,
+          duration_seconds: data.duration_seconds,
+          duration: data.duration_display,
+          language: data.language,
+          model: data.model,
+          summary: data.summary,
+          processed_at: data.processed_at
+        };
+
+        displayMetadata();
+        displayTranscript();
+        updateTranscriptLabel();
+        updateTranscriptPreview();
+
+        const transcriptSection = document.getElementById('transcriptSection');
+        if (transcriptSection) transcriptSection.classList.add('expanded');
+
+        if (currentMetadata.summary) {
+          const summarySection = document.getElementById('summarySection');
+          const summaryContent = document.getElementById('summaryContent');
+          if (summarySection && summaryContent) {
+            summarySection.style.display = 'block';
+            summarySection.classList.add('expanded');
+            summaryContent.innerHTML = sanitizeHTML(currentMetadata.summary);
+            updateSummaryPreview();
+          }
+        }
+        return;
+      }
+    } catch (e) {
+      console.error('[Voxly] Failed to load cloud transcript:', e);
+    }
+  }
+
   return new Promise((resolve) => {
     chrome.storage.local.get(['transcriptResult', 'transcriptMetadata'], (result) => {
       if (result.transcriptResult) {
@@ -1198,4 +1253,48 @@ function showStatus(message, type) {
   setTimeout(() => {
     statusMessage.className = 'status-message';
   }, STATUS_MESSAGE_TIMEOUT_MS);
+}
+
+// Setup cloud save button (shown when user is authenticated and viewing a local transcript)
+async function setupCloudSaveButton() {
+  const saveBtn = document.getElementById('saveCloudBtn');
+  if (!saveBtn) return;
+
+  // Hide if already a cloud transcript
+  if (cloudTranscriptId) {
+    saveBtn.style.display = 'none';
+    return;
+  }
+
+  // Show only for authenticated premium users with a local transcript
+  try {
+    const canUse = await canUseCloudFeatures();
+    if (canUse && currentResult) {
+      saveBtn.style.display = 'inline-flex';
+    } else {
+      saveBtn.style.display = 'none';
+    }
+  } catch (e) {
+    saveBtn.style.display = 'none';
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    if (!currentResult) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      const id = await syncTranscriptToCloud(currentResult, currentMetadata || {});
+      if (id) {
+        cloudTranscriptId = id;
+        showStatus('Saved to cloud!', 'success');
+        saveBtn.textContent = '☁️ Saved';
+        saveBtn.disabled = true;
+      }
+    } catch (e) {
+      showStatus(`Cloud save failed: ${e.message}`, 'error');
+      saveBtn.textContent = '☁️ Save to Cloud';
+      saveBtn.disabled = false;
+    }
+  });
 }

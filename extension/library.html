@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voxly - Transcript Library</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f8fafc;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #0080FF 0%, #0066CC 100%);
+      color: white;
+      padding: 24px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .header p {
+      font-size: 14px;
+      opacity: 0.9;
+      margin-top: 4px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .header-actions a {
+      color: white;
+      text-decoration: none;
+      font-size: 13px;
+      opacity: 0.9;
+    }
+
+    .header-actions a:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 24px 40px;
+    }
+
+    /* Tabs */
+    .library-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 24px;
+      border-bottom: 2px solid #d4e4f4;
+    }
+
+    .library-tab {
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #6b6b6b;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+    }
+
+    .library-tab:hover {
+      color: #0080FF;
+    }
+
+    .library-tab.active {
+      color: #0080FF;
+      border-bottom-color: #0080FF;
+    }
+
+    /* Search */
+    .search-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .search-bar input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1px solid #d4e4f4;
+      border-radius: 8px;
+      font-size: 14px;
+      background: white;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: #0080FF;
+    }
+
+    .search-bar button {
+      padding: 12px 20px;
+      background: #0080FF;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .search-bar button:hover {
+      background: #0066CC;
+    }
+
+    /* Transcript List */
+    .transcript-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .transcript-card {
+      background: white;
+      border: 1px solid #d4e4f4;
+      border-radius: 10px;
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .transcript-card:hover {
+      border-color: #0080FF;
+      box-shadow: 0 2px 8px rgba(0, 128, 255, 0.1);
+      transform: translateY(-1px);
+    }
+
+    .card-icon {
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+
+    .card-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #6b6b6b;
+      flex-wrap: wrap;
+    }
+
+    .card-meta span {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card-badge {
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .badge-public {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .badge-shared {
+      background: #e8f0f8;
+      color: #0066CC;
+    }
+
+    /* Shared with me cards */
+    .shared-info {
+      font-size: 12px;
+      color: #6b6b6b;
+      margin-top: 4px;
+    }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #d4e4f4;
+    }
+
+    .pagination button {
+      padding: 8px 16px;
+      border: 1px solid #d4e4f4;
+      background: white;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .pagination button:hover:not(:disabled) {
+      background: #e8f0f8;
+    }
+
+    .pagination button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .pagination .page-info {
+      font-size: 13px;
+      color: #6b6b6b;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b6b6b;
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .empty-state h2 {
+      font-size: 18px;
+      margin-bottom: 8px;
+      color: #1a1a1a;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+      max-width: 400px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    /* Loading */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #6b6b6b;
+    }
+
+    .loading .spinner {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      border: 3px solid #d4e4f4;
+      border-top-color: #0080FF;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Error */
+    .error-message {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 14px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    /* Auth required */
+    .auth-required {
+      text-align: center;
+      padding: 80px 20px;
+    }
+
+    .auth-required h2 {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+
+    .auth-required p {
+      color: #6b6b6b;
+      margin-bottom: 24px;
+    }
+
+    .auth-required a {
+      display: inline-block;
+      padding: 12px 24px;
+      background: #0080FF;
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 500;
+    }
+
+    .auth-required a:hover {
+      background: #0066CC;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>📚 Transcript Library</h1>
+      <p>Your cloud-synced transcriptions</p>
+    </div>
+    <div class="header-actions">
+      <a href="options.html" target="_blank">Settings</a>
+    </div>
+  </div>
+
+  <!-- Auth required state -->
+  <div id="authRequired" class="auth-required" style="display: none;">
+    <h2>Sign in to access your library</h2>
+    <p>Cloud transcript storage requires a Voxly account and premium subscription.</p>
+    <a href="options.html" target="_blank">Sign In</a>
+  </div>
+
+  <div id="libraryContent" class="container" style="display: none;">
+    <!-- Tabs -->
+    <div class="library-tabs">
+      <div class="library-tab active" data-tab="my">My Transcripts</div>
+      <div class="library-tab" data-tab="shared">Shared with Me</div>
+    </div>
+
+    <!-- Search -->
+    <div class="search-bar" id="searchBar">
+      <input type="text" id="searchInput" placeholder="Search transcripts by keyword...">
+      <button id="searchBtn">Search</button>
+    </div>
+
+    <!-- Error -->
+    <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+    <!-- Loading -->
+    <div id="loadingState" class="loading" style="display: none;">
+      <div class="spinner"></div>
+      <div>Loading transcripts...</div>
+    </div>
+
+    <!-- Transcript List -->
+    <div id="transcriptList" class="transcript-list"></div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state" style="display: none;">
+      <div class="icon">📭</div>
+      <h2 id="emptyTitle">No transcripts yet</h2>
+      <p id="emptyText">Transcribe audio or video from the Voxly side panel and your transcripts will appear here automatically.</p>
+    </div>
+
+    <!-- Pagination -->
+    <div id="pagination" class="pagination" style="display: none;">
+      <button id="prevBtn" disabled>Previous</button>
+      <span class="page-info" id="pageInfo">Page 1</span>
+      <button id="nextBtn">Next</button>
+    </div>
+  </div>
+
+  <script src="lib/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <script src="supabase.js"></script>
+  <script src="cloud-auth.js"></script>
+  <script src="cloud-sync.js"></script>
+  <script src="ExtPay.js"></script>
+  <script src="library.js"></script>
+</body>
+</html>

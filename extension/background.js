@@ -5,10 +5,11 @@
 importScripts('config.js');
 importScripts('auth.js');
 
-// Supabase cloud auth
+// Supabase cloud auth + sync
 importScripts('lib/supabase.min.js');
 importScripts('supabase.js');
 importScripts('cloud-auth.js');
+importScripts('cloud-sync.js');
 
 // Initialize ExtensionPay for premium subscriptions
 importScripts('ExtPay.js');
@@ -16,6 +17,16 @@ const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extensio
 extpay.startBackground();
 
 // SERVER_URL is defined in config.js
+
+// isPremiumUser — needed by canUseCloudFeatures() in cloud-auth.js
+async function isPremiumUser() {
+  try {
+    const user = await extpay.getUser();
+    return user.paid === true;
+  } catch (e) {
+    return false;
+  }
+}
 
 // Active job state
 let activeJob = null; // { id, metadata, status, stage, progress, result, error }
@@ -32,6 +43,9 @@ chrome.runtime.onInstalled.addListener((details) => {
 
   // Set up cloud session refresh alarm (every 55 min, tokens expire at 60)
   chrome.alarms.create('refreshCloudSession', { periodInMinutes: 55 });
+
+  // Set up cloud sync retry alarm (every 5 min for offline queue)
+  chrome.alarms.create('retrySyncQueue', { periodInMinutes: 5 });
 });
 
 // Open side panel when extension icon is clicked
@@ -172,5 +186,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // Refresh Supabase session to prevent token expiry
   if (alarm.name === 'refreshCloudSession') {
     refreshCloudSession().catch(e => console.log('Cloud session refresh error:', e));
+  }
+
+  // Retry pending cloud syncs
+  if (alarm.name === 'retrySyncQueue') {
+    retryPendingSyncs().catch(e => console.log('Sync retry error:', e));
   }
 });

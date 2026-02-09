@@ -78,6 +78,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await updateUsageIndicator();
   checkForUpdates();
   await checkActiveJob(); // Check if there's an in-progress job from before
+  updateLibraryLink(); // Show library link if cloud user
 });
 
 // Check if user is premium subscriber
@@ -563,6 +564,7 @@ async function extractYoutubeTranscript(url, languageCode = null, preflight = {}
 
     showResult(currentResult);
     incrementUsage(); // Count successful extraction
+    trySyncOrQueue(currentResult, currentMetadata); // Cloud sync (silent, non-blocking)
 
   } catch (e) {
     hideProgress();
@@ -1025,6 +1027,7 @@ function startProgressPolling() {
         currentMetadata = job.metadata;
         showResult(job.result);
         incrementUsage(); // Count successful transcription
+        trySyncOrQueue(job.result, job.metadata); // Cloud sync (silent, non-blocking)
       } else if (job.status === 'error') {
         clearInterval(pollInterval);
         hideProgress();
@@ -1286,5 +1289,17 @@ function showUpdateBanner(version) {
   if (banner && text) {
     text.textContent = `v${version} available!`;
     banner.style.display = 'block';
+  }
+}
+
+// Show/hide library link based on cloud auth state
+async function updateLibraryLink() {
+  const link = document.getElementById('libraryLink');
+  if (!link) return;
+  try {
+    const authenticated = await isCloudAuthenticated();
+    link.style.display = authenticated ? 'block' : 'none';
+  } catch (e) {
+    link.style.display = 'none';
   }
 }
