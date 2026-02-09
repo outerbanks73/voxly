@@ -246,8 +246,7 @@ RLS is enabled on all tables. All policies filter by `user_id` or `auth.uid()`. 
 
 ## 10. Roadmap
 
-### 2.5.0 - Integrations & Custom Models
-- Direct export to Notion, Obsidian, Google Docs
+### 2.5.0 - Custom Models
 - Fine-tuned Whisper for domain-specific vocabulary
 - Custom speaker voice profiles
 
