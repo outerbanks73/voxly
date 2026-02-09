@@ -26,19 +26,13 @@ function isValidSpeaker(speaker) {
 // Helper: Create YouTube timestamp URL from seconds
 function createYouTubeTimestampUrl(seconds) {
   if (!currentMetadata?.source) return null;
+  if (seconds == null || isNaN(seconds)) return null;
   const url = currentMetadata.source;
 
   // Extract video ID from various YouTube URL formats
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/
-  ];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) {
-      const videoId = match[1];
-      return `https://youtube.com/watch?v=${videoId}&t=${Math.floor(seconds)}s`;
-    }
+  const match = url.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/);
+  if (match) {
+    return `https://www.youtube.com/watch?v=${match[1]}&t=${Math.floor(seconds)}s`;
   }
   return null;
 }
