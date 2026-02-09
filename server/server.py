@@ -61,7 +61,7 @@ async def verify_auth(request: Request):
     """Verify Bearer token on protected endpoints."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing auth token. Copy token from ~/.voxly/auth_token into extension settings.")
+        raise HTTPException(status_code=401, detail="Missing auth token. Extension should auto-configure — try reloading the extension.")
     if auth_header[7:] != AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid auth token")
 
@@ -574,11 +574,12 @@ async def health():
 async def get_auth_token(request: Request):
     """Return auth token to Chrome extensions for auto-configuration.
 
-    Only responds to requests with a chrome-extension:// Origin header,
-    which browsers enforce and web pages cannot spoof.
+    Accepts requests from chrome-extension:// origins (browser-enforced)
+    and requests with no Origin header (extension service workers).
+    Web pages always send an Origin, so this still blocks cross-origin web requests.
     """
     origin = request.headers.get("Origin", "")
-    if not origin.startswith("chrome-extension://"):
+    if origin and not origin.startswith("chrome-extension://"):
         raise HTTPException(status_code=403, detail="Only Chrome extensions can auto-fetch the token")
     return {"token": AUTH_TOKEN}
 
@@ -1093,9 +1094,8 @@ def main():
     print("Server starting on http://localhost:5123")
     print()
     print(f"Auth token file: {AUTH_TOKEN_FILE}")
-    print(f"Auth token: {AUTH_TOKEN}")
     print()
-    print("Copy the auth token above into the Voxly extension settings.")
+    print("The extension auto-configures the auth token — no manual setup needed.")
     print("Press Ctrl+C to stop the server.")
     print()
 
