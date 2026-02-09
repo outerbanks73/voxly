@@ -1,7 +1,7 @@
 // Transcript Management Page JavaScript
-// Voxly v1.9.0
+// Voxly v1.9.1
 
-const CURRENT_VERSION = '1.9.0';
+const CURRENT_VERSION = '1.9.1';
 
 // Sanitize HTML from AI summaries to prevent XSS
 function sanitizeHTML(html) {

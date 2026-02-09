@@ -68,7 +68,7 @@ async def verify_auth(request: Request):
 app = FastAPI(
     title="Voxly",
     description="Instant transcripts - YouTube extraction and local Whisper transcription with speaker diarization",
-    version="1.9.0"
+    version="1.9.1"
 )
 
 # Allow CORS for Chrome extension
@@ -561,7 +561,7 @@ def process_url_transcription(job_id: str, url: str, hf_token: Optional[str], mo
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "service": "Voxly", "version": "1.9.0"}
+    return {"status": "ok", "service": "Voxly", "version": "1.9.1"}
 
 
 @app.get("/health")

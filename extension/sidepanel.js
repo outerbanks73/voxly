@@ -70,7 +70,7 @@ const STREAMING_SITES = [
 ];
 
 // Current extension version
-const CURRENT_VERSION = '1.8.1';
+const CURRENT_VERSION = '1.9.1';
 const GITHUB_REPO = 'outerbanks73/speaktotext-local'; // TODO: Consider renaming to 'voxly'
 
 // Initialize
@@ -1224,6 +1224,9 @@ async function checkForUpdates() {
       const knownUpdate = localStorage.getItem('availableUpdate');
       if (knownUpdate && compareVersions(knownUpdate, CURRENT_VERSION) > 0) {
         showUpdateBanner(knownUpdate);
+      } else if (knownUpdate) {
+        // Installed version caught up — clear stale cache
+        localStorage.removeItem('availableUpdate');
       }
       return;
     }
