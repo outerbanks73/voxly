@@ -4,6 +4,7 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PORT=5123
 LOG_FILE="$SCRIPT_DIR/server/server.log"
+PID_FILE="$SCRIPT_DIR/server/.server.pid"
 
 # Colors
 GREEN='\033[0;32m'
@@ -14,11 +15,21 @@ NC='\033[0m'
 echo "🎙️  SpeakToText Local Server"
 echo "================================"
 
-# Kill any existing python server.py processes
+# Kill any existing server process (prefer PID file, fall back to pkill)
 echo -e "${YELLOW}Checking for existing server processes...${NC}"
-pkill -9 -f "server\.py" 2>/dev/null || true
-pkill -9 -f "uvicorn" 2>/dev/null || true
-sleep 2
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        kill "$OLD_PID" 2>/dev/null
+        sleep 1
+        # Force kill if still alive
+        kill -9 "$OLD_PID" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+else
+    pkill -f "python.*server\.py" 2>/dev/null || true
+fi
+sleep 1
 
 echo -e "${GREEN}✓ Ready to start${NC}"
 
@@ -72,8 +83,17 @@ SERVER_PID=$!
 sleep 2
 
 if kill -0 $SERVER_PID 2>/dev/null; then
+    echo "$SERVER_PID" > "$PID_FILE"
     echo -e "${GREEN}✓ Server started successfully (PID: $SERVER_PID)${NC}"
     echo ""
+    # Display auth token for the user to copy into extension settings
+    AUTH_TOKEN_FILE="$HOME/.voxly/auth_token"
+    if [ -f "$AUTH_TOKEN_FILE" ]; then
+        echo -e "${YELLOW}🔑 Auth Token (paste this into extension settings):${NC}"
+        cat "$AUTH_TOKEN_FILE"
+        echo ""
+        echo ""
+    fi
     echo "To view logs:  tail -f $LOG_FILE"
     echo "To stop:       ./stop-server.sh"
 else

@@ -307,6 +307,29 @@
         </div>
       </div>
 
+      <!-- Server Auth Token -->
+      <div class="section">
+        <h2>Server Authentication</h2>
+        <div class="info-box">
+          <h3>🔒 Auth Token</h3>
+          <p>The local server requires an auth token for security. Find your token at:</p>
+          <p style="margin-top: 8px;"><code>~/.voxly/auth_token</code></p>
+          <p style="margin-top: 8px;">The token is printed to the terminal when you run <code>start-server.sh</code>.</p>
+        </div>
+
+        <div class="form-group" style="margin-top: 16px;">
+          <label>Auth Token</label>
+          <div class="input-group">
+            <input type="password" id="authTokenInput" placeholder="Paste token from ~/.voxly/auth_token">
+            <button class="toggle-visibility" id="toggleAuthToken">👁️</button>
+          </div>
+          <p class="help-text">This token authenticates the extension with your local server.</p>
+        </div>
+
+        <button class="btn btn-primary" id="saveAuthTokenBtn">Save Auth Token</button>
+        <div class="status-message" id="authTokenStatus"></div>
+      </div>
+
       <!-- Hugging Face Token -->
       <div class="section">
         <h2>Speaker Diarization (Who's Speaking?)</h2>
@@ -400,7 +423,7 @@
       <div class="section">
         <h2>About</h2>
         <p style="font-size: 14px; line-height: 1.6;">
-          <strong>Voxly</strong> v1.8.6<br><br>
+          <strong>Voxly</strong> v1.9.0<br><br>
           Transform audio and video into AI-ready data. Export transcripts to JSON, Markdown, or subtitle formats with rich metadata for LLM workflows, RAG pipelines, and knowledge bases.<br><br>
           Powered by OpenAI Whisper and pyannote.audio.
         </p>
@@ -408,6 +431,7 @@
     </div>
   </div>
 
+  <script src="auth.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

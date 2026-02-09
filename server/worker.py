@@ -178,8 +178,7 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 import torch
 
                 # Diagnostic logging for diarization
-                print(f"[DIARIZATION] HF token received: Yes (length: {len(hf_token)})", file=sys.stderr, flush=True)
-                print(f"[DIARIZATION] Token prefix: {hf_token[:10]}...", file=sys.stderr, flush=True)
+                print(f"[DIARIZATION] HF token received: Yes", file=sys.stderr, flush=True)
 
                 # Set token
                 os.environ["HF_TOKEN"] = hf_token
@@ -247,12 +246,20 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                         'speaker': speaker
                     })
 
+                # Restore original torch.load
+                torch.load = original_torch_load
+
                 combined = assign_speakers(result['segments'], diarization_segments)
                 formatted = format_transcript(combined, with_speakers=True)
                 formatted['diarization_status'] = 'success'
                 formatted['diarization_error'] = None
 
             except Exception as e:
+                # Restore original torch.load on error
+                try:
+                    torch.load = original_torch_load
+                except NameError:
+                    pass
                 # If diarization fails, log detailed error and return without speakers
                 import traceback
                 print(f"[DIARIZATION] FAILED: {str(e)}", file=sys.stderr, flush=True)
@@ -285,8 +292,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Prefer env var over CLI arg (CLI args are visible in ps aux)
+    hf_token = os.environ.get('HF_TOKEN') or args.hf_token
+
     try:
-        result = run_transcription(args.audio, args.model, args.hf_token)
+        result = run_transcription(args.audio, args.model, hf_token)
         # Output JSON to stdout - this is parsed by the main server
         print(json.dumps(result))
         sys.exit(0)

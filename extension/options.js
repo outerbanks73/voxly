@@ -9,7 +9,28 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadSettings() {
-  chrome.storage.sync.get(['hfToken', 'storageFolder', 'openaiApiKey'], (result) => {
+  // Load auth token from local storage
+  chrome.storage.local.get(['authToken'], (result) => {
+    if (result.authToken) {
+      document.getElementById('authTokenInput').value = result.authToken;
+    }
+  });
+
+  // Migrate keys from sync to local storage (one-time migration)
+  chrome.storage.sync.get(['hfToken', 'openaiApiKey'], (syncResult) => {
+    if (syncResult.hfToken || syncResult.openaiApiKey) {
+      const toMigrate = {};
+      if (syncResult.hfToken) toMigrate.hfToken = syncResult.hfToken;
+      if (syncResult.openaiApiKey) toMigrate.openaiApiKey = syncResult.openaiApiKey;
+      chrome.storage.local.set(toMigrate, () => {
+        chrome.storage.sync.remove(['hfToken', 'openaiApiKey']);
+        console.log('Migrated API keys from sync to local storage');
+      });
+    }
+  });
+
+  // Load sensitive keys from local storage
+  chrome.storage.local.get(['hfToken', 'openaiApiKey'], (result) => {
     if (result.hfToken) {
       document.getElementById('hfTokenInput').value = result.hfToken;
       updateTokenStatus('saved');
@@ -17,12 +38,15 @@ function loadSettings() {
       updateTokenStatus('empty');
     }
 
-    if (result.storageFolder) {
-      document.getElementById('storageFolderInput').value = result.storageFolder;
-    }
-
     if (result.openaiApiKey) {
       document.getElementById('openaiKeyInput').value = result.openaiApiKey;
+    }
+  });
+
+  // Storage folder stays in sync (not sensitive)
+  chrome.storage.sync.get(['storageFolder'], (result) => {
+    if (result.storageFolder) {
+      document.getElementById('storageFolderInput').value = result.storageFolder;
     }
   });
 }
@@ -81,6 +105,40 @@ async function checkServerStatus() {
 }
 
 function setupEventListeners() {
+  // Save auth token
+  document.getElementById('saveAuthTokenBtn').addEventListener('click', () => {
+    const token = document.getElementById('authTokenInput').value.trim();
+    const statusEl = document.getElementById('authTokenStatus');
+
+    chrome.storage.local.set({ authToken: token }, () => {
+      statusEl.className = 'status-message success';
+      statusEl.textContent = token ? 'Auth token saved! Extension will use it for server requests.' : 'Auth token cleared.';
+
+      // Re-check server connection with the new token
+      checkServerStatus();
+
+      setTimeout(() => {
+        statusEl.className = 'status-message';
+      }, 3000);
+    });
+  });
+
+  // Toggle auth token visibility
+  const toggleAuthBtn = document.getElementById('toggleAuthToken');
+  const authTokenInput = document.getElementById('authTokenInput');
+
+  if (toggleAuthBtn && authTokenInput) {
+    toggleAuthBtn.addEventListener('click', () => {
+      if (authTokenInput.type === 'password') {
+        authTokenInput.type = 'text';
+        toggleAuthBtn.textContent = '🙈';
+      } else {
+        authTokenInput.type = 'password';
+        toggleAuthBtn.textContent = '👁️';
+      }
+    });
+  }
+
   // Toggle HF token visibility
   const toggleBtn = document.getElementById('toggleToken');
   const tokenInput = document.getElementById('hfTokenInput');
@@ -118,7 +176,7 @@ function setupEventListeners() {
       const key = openaiKeyInput.value.trim();
       const statusEl = document.getElementById('openaiKeyStatus');
 
-      chrome.storage.sync.set({ openaiApiKey: key }, () => {
+      chrome.storage.local.set({ openaiApiKey: key }, () => {
         statusEl.className = 'status-message success';
         statusEl.textContent = key ? 'API key saved successfully!' : 'API key cleared.';
 
@@ -134,7 +192,7 @@ function setupEventListeners() {
     const token = tokenInput.value.trim();
     const statusEl = document.getElementById('tokenStatus');
 
-    chrome.storage.sync.set({ hfToken: token }, () => {
+    chrome.storage.local.set({ hfToken: token }, () => {
       statusEl.className = 'status-message success';
       statusEl.textContent = token ? 'Token saved successfully!' : 'Token cleared.';
 
@@ -172,7 +230,7 @@ function setupEventListeners() {
       const formData = new FormData();
       formData.append('hf_token', token);
 
-      const response = await fetch(`${SERVER_URL}/verify-token`, {
+      const response = await authenticatedFetch(`${SERVER_URL}/verify-token`, {
         method: 'POST',
         body: formData
       });
@@ -219,7 +277,7 @@ function setupEventListeners() {
     chrome.storage.sync.set({ storageFolder: folder }, async () => {
       // Also update the server
       try {
-        const response = await fetch(`${SERVER_URL}/settings/storage`, {
+        const response = await authenticatedFetch(`${SERVER_URL}/settings/storage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ folder: folder })

@@ -1,7 +1,21 @@
 // Transcript Management Page JavaScript
-// Voxly v1.8.6
+// Voxly v1.9.0
 
-const CURRENT_VERSION = '1.8.6';
+const CURRENT_VERSION = '1.9.0';
+
+// Sanitize HTML from AI summaries to prevent XSS
+function sanitizeHTML(html) {
+  if (typeof DOMPurify !== 'undefined') {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['h3', 'h4', 'ul', 'ol', 'li', 'p', 'a', 'strong', 'em', 'br', 'div', 'span'],
+      ALLOWED_ATTR: ['href', 'target', 'class']
+    });
+  }
+  // Fallback: strip all HTML tags
+  const div = document.createElement('div');
+  div.textContent = html;
+  return div.innerHTML;
+}
 
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -139,7 +153,7 @@ async function loadTranscriptData() {
           if (summarySection && summaryContent) {
             summarySection.style.display = 'block';
             summarySection.classList.add('expanded');  // Expand so content is visible
-            summaryContent.innerHTML = currentMetadata.summary;
+            summaryContent.innerHTML = sanitizeHTML(currentMetadata.summary);
             updateSummaryPreview();
           }
         } else if (currentResult?.full_text) {
@@ -175,7 +189,7 @@ async function autoGenerateSummary() {
 
   try {
     const summary = await generateSummary(apiKey, currentResult.full_text);
-    summaryContent.innerHTML = summary;
+    summaryContent.innerHTML = sanitizeHTML(summary);
     currentMetadata.summary = summary;
     await chrome.storage.local.set({ transcriptMetadata: currentMetadata });
     updateSummaryPreview();
@@ -674,7 +688,7 @@ async function isPremiumUser() {
 // Get OpenAI API key from storage
 async function getOpenAIApiKey() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['openaiApiKey'], (result) => {
+    chrome.storage.local.get(['openaiApiKey'], (result) => {
       resolve(result.openaiApiKey || '');
     });
   });
@@ -708,7 +722,7 @@ async function handleSummarize() {
 
   try {
     const summary = await generateSummary(apiKey, currentResult.full_text);
-    summaryContent.innerHTML = summary;  // Use innerHTML since summary contains HTML formatting
+    summaryContent.innerHTML = sanitizeHTML(summary);
     updateSummaryPreview();
 
     // Store summary in metadata

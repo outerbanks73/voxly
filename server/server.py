@@ -19,11 +19,12 @@ import hashlib
 import time
 import re
 import threading
+import secrets
 from pathlib import Path
 from typing import Optional
 import json
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -36,23 +37,75 @@ try:
 except ImportError:
     YOUTUBE_TRANSCRIPT_AVAILABLE = False
 
+# ============================================================
+# Authentication
+# ============================================================
+
+AUTH_TOKEN_FILE = Path.home() / ".voxly" / "auth_token"
+
+def load_or_create_auth_token() -> str:
+    """Load auth token from file, or create one if it doesn't exist."""
+    AUTH_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if AUTH_TOKEN_FILE.exists():
+        token = AUTH_TOKEN_FILE.read_text().strip()
+        if token:
+            return token
+    token = secrets.token_hex(32)
+    AUTH_TOKEN_FILE.write_text(token)
+    AUTH_TOKEN_FILE.chmod(0o600)
+    return token
+
+AUTH_TOKEN = load_or_create_auth_token()
+
+async def verify_auth(request: Request):
+    """Verify Bearer token on protected endpoints."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing auth token. Copy token from ~/.voxly/auth_token into extension settings.")
+    if auth_header[7:] != AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid auth token")
+
 app = FastAPI(
     title="Voxly",
     description="Instant transcripts - YouTube extraction and local Whisper transcription with speaker diarization",
-    version="1.6.0"
+    version="1.9.0"
 )
 
 # Allow CORS for Chrome extension
+# Wildcard origin is kept because Chrome extension IDs are unstable for dev-loaded extensions.
+# Security is enforced via the Bearer token in verify_auth, not via origin checks.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Chrome extensions have unique origins
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Global state for job tracking
 jobs = {}
+MAX_JOBS = 100
+MAX_JOB_AGE = 3600  # 1 hour
+
+def sanitize_error_message(msg: str) -> str:
+    """Strip absolute paths and sensitive info from error messages."""
+    import re
+    # Remove absolute file paths
+    msg = re.sub(r'(/[^\s:]+/)+[^\s:]*', '<path>', msg)
+    # Remove HF tokens
+    msg = re.sub(r'hf_[a-zA-Z0-9]{10,}', '<redacted>', msg)
+    return msg[:500]
+
+def cleanup_old_jobs():
+    """Remove completed/errored jobs older than MAX_JOB_AGE."""
+    now = time.time()
+    to_remove = [
+        jid for jid, job in jobs.items()
+        if job.get('status') in ('completed', 'error')
+        and now - job.get('started_at', now) > MAX_JOB_AGE
+    ]
+    for jid in to_remove:
+        del jobs[jid]
 
 # Settings file for persistent configuration
 SETTINGS_FILE = Path(__file__).parent / "settings.json"
@@ -72,14 +125,27 @@ def save_settings(settings):
     with open(SETTINGS_FILE, 'w') as f:
         json.dump(settings, f, indent=2)
 
+def validate_storage_path(folder: str) -> Path:
+    """Validate a storage path is safe (no traversal, under home dir)."""
+    path = Path(folder).resolve()
+    home = Path.home().resolve()
+    if '..' in folder:
+        raise ValueError("Path must not contain '..'")
+    if not str(path).startswith(str(home)):
+        raise ValueError("Storage path must be under the user's home directory")
+    return path
+
 def get_cache_dir():
     """Get the cache directory, respecting user settings."""
     settings = load_settings()
     custom_folder = settings.get('storage_folder', '').strip()
     if custom_folder:
-        cache_path = Path(custom_folder)
-        cache_path.mkdir(parents=True, exist_ok=True)
-        return cache_path
+        try:
+            cache_path = validate_storage_path(custom_folder)
+            cache_path.mkdir(parents=True, exist_ok=True)
+            return cache_path
+        except ValueError:
+            print(f"[WARNING] Invalid storage path '{custom_folder}', using default")
     return Path(tempfile.gettempdir()) / "speaktotext_cache"
 
 # Cache directory for downloaded audio
@@ -288,7 +354,7 @@ def format_transcript_timestamp(seconds: float) -> str:
 
 def get_cache_path(url: str) -> Path:
     """Get cache file path for a URL."""
-    url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:12]
     return CACHE_DIR / f"{url_hash}.mp3"
 
 
@@ -404,8 +470,10 @@ def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[st
             '--job-id', job_id
         ]
 
+        # Pass HF token via environment variable (not CLI arg, which is visible in ps)
+        env = os.environ.copy()
         if hf_token:
-            cmd.extend(['--hf-token', hf_token])
+            env['HF_TOKEN'] = hf_token
 
         # Run worker in subprocess with dynamic timeout
         # Capture stderr for diagnostic logging
@@ -414,7 +482,8 @@ def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[st
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            env=env
         )
 
         # Log worker stderr for debugging (especially diarization issues)
@@ -450,7 +519,7 @@ def run_transcription_worker(job_id: str, audio_path: str, hf_token: Optional[st
             jobs[job_id]['error'] = f'Transcription timed out after {format_duration(timeout)}. Try with a shorter video.'
     except Exception as e:
         jobs[job_id]['status'] = 'error'
-        jobs[job_id]['error'] = str(e)
+        jobs[job_id]['error'] = sanitize_error_message(str(e))
 
         # Provide helpful error messages
         error_str = str(e).lower()
@@ -486,13 +555,13 @@ def process_url_transcription(job_id: str, url: str, hf_token: Optional[str], mo
             else:
                 jobs[job_id]['error'] = f"Transcription timed out. Try with a shorter video."
         else:
-            jobs[job_id]['error'] = str(e)
+            jobs[job_id]['error'] = sanitize_error_message(str(e))
 
 
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "service": "SpeakToText Local", "version": "1.0.0"}
+    return {"status": "ok", "service": "Voxly", "version": "1.9.0"}
 
 
 @app.get("/health")
@@ -505,12 +574,21 @@ async def health():
 async def transcribe_file(
     file: UploadFile = File(...),
     hf_token: Optional[str] = Form(None),
-    model: str = Form("base")
+    model: str = Form("base"),
+    _auth=Depends(verify_auth)
 ):
     """Transcribe an uploaded audio file."""
+    cleanup_old_jobs()
+    if len(jobs) >= MAX_JOBS:
+        raise HTTPException(status_code=429, detail="Too many active jobs. Please wait for existing jobs to complete.")
+
+    MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
+
     # Save uploaded file
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix)
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024*1024)} MB.")
     temp_file.write(content)
     temp_file.close()
 
@@ -538,8 +616,9 @@ realtime_sessions = {}
 
 
 @app.post("/transcribe/realtime/start")
-async def start_realtime(model: str = Form("tiny")):
+async def start_realtime(model: str = Form("tiny"), _auth=Depends(verify_auth)):
     """Start a real-time transcription session."""
+    cleanup_old_jobs()
     import uuid
     session_id = str(uuid.uuid4())
     realtime_sessions[session_id] = {
@@ -555,7 +634,8 @@ async def start_realtime(model: str = Form("tiny")):
 @app.post("/transcribe/realtime/chunk/{session_id}")
 async def add_realtime_chunk(
     session_id: str,
-    chunk: UploadFile = File(...)
+    chunk: UploadFile = File(...),
+    _auth=Depends(verify_auth)
 ):
     """Add an audio chunk to a real-time session and get transcription."""
     if session_id not in realtime_sessions:
@@ -566,7 +646,10 @@ async def add_realtime_chunk(
         raise HTTPException(status_code=400, detail="Session not active")
 
     # Save chunk to temp file
+    MAX_CHUNK_SIZE = 50 * 1024 * 1024  # 50 MB
     chunk_data = await chunk.read()
+    if len(chunk_data) > MAX_CHUNK_SIZE:
+        raise HTTPException(status_code=413, detail=f"Chunk too large. Maximum size is {MAX_CHUNK_SIZE // (1024*1024)} MB.")
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.webm')
     temp_file.write(chunk_data)
     temp_file.close()
@@ -596,7 +679,8 @@ async def add_realtime_chunk(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
-            timeout=chunk_timeout
+            timeout=chunk_timeout,
+            env=os.environ.copy()
         )
 
         Path(temp_file.name).unlink(missing_ok=True)
@@ -625,7 +709,7 @@ async def add_realtime_chunk(
 
 
 @app.post("/transcribe/realtime/stop/{session_id}")
-async def stop_realtime(session_id: str):
+async def stop_realtime(session_id: str, _auth=Depends(verify_auth)):
     """Stop a real-time transcription session."""
     if session_id not in realtime_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -649,7 +733,7 @@ async def stop_realtime(session_id: str):
 
 
 @app.post("/transcribe/preflight")
-async def preflight_check(url: str = Form(...)):
+async def preflight_check(url: str = Form(...), _auth=Depends(verify_auth)):
     """Get video duration and metadata without downloading.
 
     Uses yt-dlp --dump-json to fetch metadata quickly.
@@ -714,7 +798,8 @@ async def preflight_check(url: str = Form(...)):
 @app.post("/transcribe/youtube/transcript")
 async def extract_youtube_transcript_endpoint(
     url: str = Form(...),
-    language_code: Optional[str] = Form(None)
+    language_code: Optional[str] = Form(None),
+    _auth=Depends(verify_auth)
 ):
     """Extract existing YouTube transcript directly (instant).
 
@@ -828,9 +913,14 @@ async def transcribe_url(
     url: str = Form(...),
     hf_token: Optional[str] = Form(None),
     model: str = Form(None),
-    duration_seconds: Optional[int] = Form(None)
+    duration_seconds: Optional[int] = Form(None),
+    _auth=Depends(verify_auth)
 ):
     """Transcribe audio from a URL (YouTube, podcast, etc.)."""
+    cleanup_old_jobs()
+    if len(jobs) >= MAX_JOBS:
+        raise HTTPException(status_code=429, detail="Too many active jobs. Please wait for existing jobs to complete.")
+
     import uuid
 
     # Smart model selection if not specified
@@ -879,7 +969,7 @@ async def transcribe_url(
 
 
 @app.get("/job/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, _auth=Depends(verify_auth)):
     """Get the status of a transcription job."""
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -887,7 +977,7 @@ async def get_job_status(job_id: str):
 
 
 @app.delete("/job/{job_id}")
-async def delete_job(job_id: str):
+async def delete_job(job_id: str, _auth=Depends(verify_auth)):
     """Delete a completed job."""
     if job_id in jobs:
         del jobs[job_id]
@@ -895,7 +985,7 @@ async def delete_job(job_id: str):
 
 
 @app.get("/models")
-async def list_models():
+async def list_models(_auth=Depends(verify_auth)):
     """List available Whisper models."""
     return {
         "models": [
@@ -909,10 +999,16 @@ async def list_models():
 
 
 @app.post("/settings/storage")
-async def update_storage_settings(request: dict):
+async def update_storage_settings(request: dict, _auth=Depends(verify_auth)):
     """Update storage folder setting."""
     global CACHE_DIR
     folder = request.get('folder', '').strip()
+
+    if folder:
+        try:
+            validate_storage_path(folder)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     settings = load_settings()
     settings['storage_folder'] = folder
@@ -926,7 +1022,7 @@ async def update_storage_settings(request: dict):
 
 
 @app.get("/settings")
-async def get_settings():
+async def get_settings(_auth=Depends(verify_auth)):
     """Get current settings."""
     settings = load_settings()
     return {
@@ -936,7 +1032,7 @@ async def get_settings():
 
 
 @app.post("/verify-token")
-async def verify_token(hf_token: str = Form(...)):
+async def verify_token(hf_token: str = Form(...), _auth=Depends(verify_auth)):
     """Verify HuggingFace token and check access to diarization model.
 
     This endpoint tests if the token is valid and has access to the
@@ -978,12 +1074,15 @@ async def verify_token(hf_token: str = Form(...)):
 def main():
     """Run the server."""
     print("=" * 60)
-    print("SpeakToText Local Server")
+    print("Voxly Server")
     print("=" * 60)
     print()
     print("Server starting on http://localhost:5123")
     print()
-    print("Make sure the Chrome extension is configured to connect to this address.")
+    print(f"Auth token file: {AUTH_TOKEN_FILE}")
+    print(f"Auth token: {AUTH_TOKEN}")
+    print()
+    print("Copy the auth token above into the Voxly extension settings.")
     print("Press Ctrl+C to stop the server.")
     print()
 

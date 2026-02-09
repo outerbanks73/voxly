@@ -312,7 +312,7 @@ function setupButtons() {
 // Get HF token from storage
 async function getHfToken() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['hfToken'], (result) => {
+    chrome.storage.local.get(['hfToken'], (result) => {
       resolve(result.hfToken || '');
     });
   });
@@ -359,7 +359,7 @@ async function transcribeFile(file) {
   }
 
   try {
-    const response = await fetch(`${SERVER_URL}/transcribe/file`, {
+    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/file`, {
       method: 'POST',
       body: formData
     });
@@ -392,7 +392,7 @@ async function preflightCheck(url) {
     const formData = new FormData();
     formData.append('url', url);
 
-    const response = await fetch(`${SERVER_URL}/transcribe/preflight`, {
+    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/preflight`, {
       method: 'POST',
       body: formData
     });
@@ -532,7 +532,7 @@ async function extractYoutubeTranscript(url, languageCode = null, preflight = {}
   }
 
   try {
-    const response = await fetch(`${SERVER_URL}/transcribe/youtube/transcript`, {
+    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/youtube/transcript`, {
       method: 'POST',
       body: formData
     });
@@ -646,7 +646,7 @@ async function transcribeUrl(url) {
   }
 
   try {
-    const response = await fetch(`${SERVER_URL}/transcribe/url`, {
+    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/url`, {
       method: 'POST',
       body: formData
     });
@@ -764,7 +764,7 @@ async function startRealtimeSession(stream) {
     const formData = new FormData();
     formData.append('model', model);
 
-    const response = await fetch(`${SERVER_URL}/transcribe/realtime/start`, {
+    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/realtime/start`, {
       method: 'POST',
       body: formData
     });
@@ -802,7 +802,7 @@ async function startRealtimeSession(stream) {
           const formData = new FormData();
           formData.append('chunk', blob, 'chunk.webm');
 
-          const response = await fetch(`${SERVER_URL}/transcribe/realtime/chunk/${realtimeSessionId}`, {
+          const response = await authenticatedFetch(`${SERVER_URL}/transcribe/realtime/chunk/${realtimeSessionId}`, {
             method: 'POST',
             body: formData
           });
@@ -828,9 +828,13 @@ function updateRealtimeTranscript(transcripts) {
   const container = document.getElementById('realtimeTranscript');
   if (transcripts && transcripts.length > 0) {
     // Show each chunk as a separate block for better visual feedback
-    container.innerHTML = transcripts.map((t, i) =>
-      `<div style="margin-bottom: 8px; padding: 4px 0; border-bottom: 1px solid #eee;">${t}</div>`
-    ).join('');
+    container.textContent = '';
+    transcripts.forEach((t) => {
+      const div = document.createElement('div');
+      div.style.cssText = 'margin-bottom: 8px; padding: 4px 0; border-bottom: 1px solid #eee;';
+      div.textContent = t;
+      container.appendChild(div);
+    });
     container.scrollTop = container.scrollHeight;
   }
 }
@@ -842,7 +846,7 @@ async function stopRealtimeSession() {
 
   if (realtimeSessionId) {
     try {
-      const response = await fetch(`${SERVER_URL}/transcribe/realtime/stop/${realtimeSessionId}`, {
+      const response = await authenticatedFetch(`${SERVER_URL}/transcribe/realtime/stop/${realtimeSessionId}`, {
         method: 'POST'
       });
 
@@ -931,7 +935,7 @@ async function transcribeRecording(blob) {
   }
 
   try {
-    const response = await fetch(`${SERVER_URL}/transcribe/file`, {
+    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/file`, {
       method: 'POST',
       body: formData
     });

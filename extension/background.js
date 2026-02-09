@@ -1,6 +1,9 @@
 // Voxly - Background Service Worker
 // Handles persistent job tracking, side panel management, and ExtensionPay
 
+// Shared auth helper for authenticated server requests
+importScripts('auth.js');
+
 // Initialize ExtensionPay for premium subscriptions
 importScripts('ExtPay.js');
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
@@ -92,7 +95,7 @@ async function pollJobStatus() {
   }
 
   try {
-    const response = await fetch(`${SERVER_URL}/job/${activeJob.id}`);
+    const response = await authenticatedFetch(`${SERVER_URL}/job/${activeJob.id}`);
     const job = await response.json();
 
     if (job.status === 'completed') {
