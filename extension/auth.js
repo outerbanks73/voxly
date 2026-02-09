@@ -1,7 +1,6 @@
 // Voxly - Shared Authentication Helper
 // Used by background.js, sidepanel.js, options.js, and transcript.js
-
-const AUTH_SERVER_URL = 'http://localhost:5123';
+// Depends on config.js (SERVER_URL)
 
 async function getAuthToken() {
   const { authToken } = await chrome.storage.local.get(['authToken']);
@@ -12,7 +11,7 @@ async function getAuthToken() {
 // The server only returns the token to chrome-extension:// origins (browser-enforced).
 async function autoConfigureAuthToken() {
   try {
-    const response = await fetch(`${AUTH_SERVER_URL}/auth/token`);
+    const response = await fetch(`${SERVER_URL}/auth/token`);
     if (response.ok) {
       const data = await response.json();
       if (data.token) {

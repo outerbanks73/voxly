@@ -1305,6 +1305,7 @@ async function setupCloudSaveButton() {
 // ============================================================
 
 // Setup share button (only for cloud transcripts)
+let _shareListenersAttached = false;
 function setupShareButton() {
   const shareBtn = document.getElementById('shareBtn');
   if (!shareBtn) return;
@@ -1316,6 +1317,9 @@ function setupShareButton() {
   }
 
   shareBtn.style.display = 'inline-flex';
+
+  if (_shareListenersAttached) return;
+  _shareListenersAttached = true;
 
   shareBtn.addEventListener('click', () => {
     openShareModal();
@@ -1335,25 +1339,32 @@ function setupShareButton() {
   }
 
   // Public toggle
-  document.getElementById('publicToggle').addEventListener('change', handlePublicToggle);
+  const publicToggle = document.getElementById('publicToggle');
+  if (publicToggle) publicToggle.addEventListener('change', handlePublicToggle);
 
   // Share invite
-  document.getElementById('shareInviteBtn').addEventListener('click', handleShareInvite);
+  const shareInviteBtn = document.getElementById('shareInviteBtn');
+  if (shareInviteBtn) shareInviteBtn.addEventListener('click', handleShareInvite);
 
   // Copy link
-  document.getElementById('copyLinkBtn').addEventListener('click', async () => {
-    const input = document.getElementById('publicLinkInput');
-    try {
-      await navigator.clipboard.writeText(input.value);
-      showStatus('Link copied!', 'success');
-    } catch (e) {
-      showStatus('Failed to copy link', 'error');
-    }
-  });
+  const copyLinkBtn = document.getElementById('copyLinkBtn');
+  if (copyLinkBtn) {
+    copyLinkBtn.addEventListener('click', async () => {
+      const input = document.getElementById('publicLinkInput');
+      if (!input) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        showStatus('Link copied!', 'success');
+      } catch (e) {
+        showStatus('Failed to copy link', 'error');
+      }
+    });
+  }
 }
 
 async function openShareModal() {
   const modal = document.getElementById('shareModal');
+  if (!modal) return;
   modal.style.display = 'flex';
 
   // Load current share state
@@ -1379,7 +1390,8 @@ async function openShareModal() {
 }
 
 function closeShareModal() {
-  document.getElementById('shareModal').style.display = 'none';
+  const modal = document.getElementById('shareModal');
+  if (modal) modal.style.display = 'none';
 }
 
 async function handlePublicToggle(e) {
@@ -1407,6 +1419,7 @@ async function handleShareInvite() {
   const emailInput = document.getElementById('shareEmailInput');
   const permSelect = document.getElementById('sharePermission');
   const statusEl = document.getElementById('shareInviteStatus');
+  if (!emailInput || !permSelect || !statusEl) return;
   const email = emailInput.value.trim();
 
   if (!email) {
@@ -1453,7 +1466,7 @@ async function loadActiveShares() {
       item.innerHTML = `
         <div class="share-item-info">
           <span class="share-item-email">${escapeHtmlForShare(displayName)}</span>
-          <span class="share-item-perm">${email} &middot; ${share.permission === 'write' ? 'Can edit' : 'View only'}</span>
+          <span class="share-item-perm">${escapeHtmlForShare(email)} &middot; ${share.permission === 'write' ? 'Can edit' : 'View only'}</span>
         </div>
         <button class="share-revoke-btn" data-share-id="${share.id}">Revoke</button>
       `;

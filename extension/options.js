@@ -13,13 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadSettings() {
-  // Load auth token from local storage
-  chrome.storage.local.get(['authToken'], (result) => {
-    if (result.authToken) {
-      document.getElementById('authTokenInput').value = result.authToken;
-    }
-  });
-
   // Migrate keys from sync to local storage (one-time migration)
   chrome.storage.sync.get(['hfToken', 'openaiApiKey'], (syncResult) => {
     if (syncResult.hfToken || syncResult.openaiApiKey) {
@@ -104,40 +97,6 @@ async function checkServerStatus() {
 }
 
 function setupEventListeners() {
-  // Save auth token
-  document.getElementById('saveAuthTokenBtn').addEventListener('click', () => {
-    const token = document.getElementById('authTokenInput').value.trim();
-    const statusEl = document.getElementById('authTokenStatus');
-
-    chrome.storage.local.set({ authToken: token }, () => {
-      statusEl.className = 'status-message success';
-      statusEl.textContent = token ? 'Auth token saved! Extension will use it for server requests.' : 'Auth token cleared.';
-
-      // Re-check server connection with the new token
-      checkServerStatus();
-
-      setTimeout(() => {
-        statusEl.className = 'status-message';
-      }, STATUS_MESSAGE_TIMEOUT_MS);
-    });
-  });
-
-  // Toggle auth token visibility
-  const toggleAuthBtn = document.getElementById('toggleAuthToken');
-  const authTokenInput = document.getElementById('authTokenInput');
-
-  if (toggleAuthBtn && authTokenInput) {
-    toggleAuthBtn.addEventListener('click', () => {
-      if (authTokenInput.type === 'password') {
-        authTokenInput.type = 'text';
-        toggleAuthBtn.textContent = '🙈';
-      } else {
-        authTokenInput.type = 'password';
-        toggleAuthBtn.textContent = '👁️';
-      }
-    });
-  }
-
   // Toggle HF token visibility
   const toggleBtn = document.getElementById('toggleToken');
   const tokenInput = document.getElementById('hfTokenInput');
