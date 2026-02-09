@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 def convert_to_wav(input_path: str) -> str:
-    """Convert audio to 16kHz mono WAV."""
+    """Convert audio to 16kHz mono WAV for reliable decoding."""
     temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
     temp_wav.close()
 
@@ -27,7 +27,7 @@ def convert_to_wav(input_path: str) -> str:
          '-ac', '1', '-y', temp_wav.name],
         capture_output=True,
         text=True,
-        timeout=3600  # 1 hour - sufficient for very long audio files
+        timeout=3600
     )
 
     if result.returncode != 0:
@@ -157,30 +157,36 @@ def format_transcript(segments: list, with_speakers: bool = False) -> dict:
 
 def run_transcription(audio_path: str, model_name: str, hf_token: str = None) -> dict:
     """Run the transcription and return result."""
-    import io
-    import contextlib
+    from faster_whisper import WhisperModel
 
-    # Convert to WAV
+    # Convert to WAV for reliable decoding (PyAV may lack codecs for mp3/webm)
     wav_path = convert_to_wav(audio_path)
 
     try:
-        # Import and run Whisper
-        import whisper
-        model = whisper.load_model(model_name)
+        # Load model -- int8 is fastest on CPU (including Apple Silicon via Accelerate)
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
 
-        # Suppress Whisper's stdout output (like "Detected language: English")
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            result = model.transcribe(wav_path, verbose=False)
+        # Transcribe with VAD to skip silence and reduce hallucinations
+        segments_gen, info = model.transcribe(
+            wav_path,
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+        )
+
+        # Materialize generator into list of dicts (matching format the rest of the code expects)
+        segments = [
+            {'start': seg.start, 'end': seg.end, 'text': seg.text}
+            for seg in segments_gen
+        ]
 
         # Speaker diarization if token provided
         if hf_token:
             try:
                 import torch
 
-                # Diagnostic logging for diarization
                 print(f"[DIARIZATION] HF token received: Yes", file=sys.stderr, flush=True)
 
-                # Set token
                 os.environ["HF_TOKEN"] = hf_token
                 os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
                 print(f"[DIARIZATION] HF_TOKEN env var set: {'HF_TOKEN' in os.environ}", file=sys.stderr, flush=True)
@@ -193,10 +199,8 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 original_hf_hub_download = huggingface_hub.hf_hub_download
 
                 def patched_hf_hub_download(*args, **kwargs):
-                    # Convert deprecated use_auth_token to token
                     if 'use_auth_token' in kwargs:
                         kwargs['token'] = kwargs.pop('use_auth_token')
-                    # Inject token if not provided (pyannote may not pass it)
                     if 'token' not in kwargs or kwargs.get('token') is None:
                         kwargs['token'] = hf_token
                     return original_hf_hub_download(*args, **kwargs)
@@ -205,7 +209,6 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 import huggingface_hub.file_download
                 huggingface_hub.file_download.hf_hub_download = patched_hf_hub_download
 
-                # Patch torch.load
                 original_torch_load = torch.load
 
                 def patched_torch_load(*args, **kwargs):
@@ -214,7 +217,6 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
 
                 torch.load = patched_torch_load
 
-                # Patch lightning_fabric
                 import lightning_fabric.utilities.cloud_io
 
                 def patched_pl_load(path_or_url, map_location=None, **kwargs):
@@ -225,14 +227,12 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 from pyannote.audio import Pipeline
 
                 print(f"[DIARIZATION] Attempting to load pyannote pipeline...", file=sys.stderr, flush=True)
-                # Pass token explicitly to ensure authentication
                 pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1",
                     use_auth_token=hf_token
                 )
                 print(f"[DIARIZATION] Pipeline loaded successfully!", file=sys.stderr, flush=True)
 
-                # Use MPS on Apple Silicon if available
                 if torch.backends.mps.is_available():
                     pipeline.to(torch.device("mps"))
 
@@ -249,7 +249,7 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                 # Restore original torch.load
                 torch.load = original_torch_load
 
-                combined = assign_speakers(result['segments'], diarization_segments)
+                combined = assign_speakers(segments, diarization_segments)
                 formatted = format_transcript(combined, with_speakers=True)
                 formatted['diarization_status'] = 'success'
                 formatted['diarization_error'] = None
@@ -260,26 +260,25 @@ def run_transcription(audio_path: str, model_name: str, hf_token: str = None) ->
                     torch.load = original_torch_load
                 except NameError:
                     pass
-                # If diarization fails, log detailed error and return without speakers
                 import traceback
                 print(f"[DIARIZATION] FAILED: {str(e)}", file=sys.stderr, flush=True)
                 print(f"[DIARIZATION] Full traceback:", file=sys.stderr, flush=True)
                 traceback.print_exc(file=sys.stderr)
-                formatted = format_transcript(result['segments'], with_speakers=False)
+                formatted = format_transcript(segments, with_speakers=False)
                 formatted['diarization_status'] = 'failed'
                 formatted['diarization_error'] = str(e)
         else:
-            formatted = format_transcript(result['segments'], with_speakers=False)
+            formatted = format_transcript(segments, with_speakers=False)
             formatted['diarization_status'] = 'skipped'
             formatted['diarization_error'] = 'No Hugging Face token provided'
 
         return {
             'result': formatted,
-            'language': result.get('language', 'unknown')
+            'language': info.language if info.language else 'unknown'
         }
 
     finally:
-        # Cleanup WAV file
+        # Cleanup WAV temp file
         Path(wav_path).unlink(missing_ok=True)
 
 
