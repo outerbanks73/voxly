@@ -11,10 +11,12 @@
     "activeTab",
     "offscreen",
     "alarms",
-    "sidePanel"
+    "sidePanel",
+    "identity"
   ],
   "host_permissions": [
-    "http://localhost:5123/*"
+    "http://localhost:5123/*",
+    "https://ohxuifdseybxckmprcry.supabase.co/*"
   ],
   "action": {
     "default_title": "Open Voxly",

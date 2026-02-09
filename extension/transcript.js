@@ -1,7 +1,5 @@
 // Transcript Management Page JavaScript
-// Voxly v1.9.1
-
-const CURRENT_VERSION = '1.9.1';
+// CURRENT_VERSION, SERVER_URL, and other constants are defined in config.js
 
 // Sanitize HTML from AI summaries to prevent XSS
 function sanitizeHTML(html) {
@@ -67,8 +65,8 @@ function updateSummaryPreview() {
   if (summaryContent && summaryPreview) {
     const text = summaryContent.textContent || summaryContent.innerText || '';
     if (text.trim()) {
-      const preview = text.substring(0, 200).trim();
-      summaryPreview.textContent = preview + (text.length > 200 ? '...' : '');
+      const preview = text.substring(0, SUMMARY_PREVIEW_LENGTH).trim();
+      summaryPreview.textContent = preview + (text.length > SUMMARY_PREVIEW_LENGTH ? '...' : '');
     } else {
       summaryPreview.textContent = 'Click to expand and view AI summary...';
     }
@@ -79,8 +77,8 @@ function updateTranscriptPreview() {
   const transcriptPreview = document.getElementById('transcriptPreview');
   if (transcriptPreview && currentResult?.full_text) {
     const text = currentResult.full_text;
-    const preview = text.substring(0, 200).trim();
-    transcriptPreview.textContent = preview + (text.length > 200 ? '...' : '');
+    const preview = text.substring(0, SUMMARY_PREVIEW_LENGTH).trim();
+    transcriptPreview.textContent = preview + (text.length > SUMMARY_PREVIEW_LENGTH ? '...' : '');
   } else if (transcriptPreview) {
     transcriptPreview.textContent = 'Click to expand and view transcript...';
   }
@@ -356,8 +354,9 @@ function groupSegmentsIntoParagraphs(segments) {
   const paragraphs = [];
   let currentPara = { speaker: null, texts: [], startTime: null, startSeconds: 0, segmentCount: 0 };
 
-  const MAX_SEGMENTS_PER_PARAGRAPH = 6; // Break every ~6 segments for readability
-  const TIME_GAP_THRESHOLD = 10; // Break on 10+ second gaps (natural pauses)
+  // Config constants from config.js
+  const maxSegments = MAX_SEGMENTS_PER_PARAGRAPH;
+  const timeGapThreshold = TIME_GAP_THRESHOLD_S;
 
   segments.forEach((seg, index) => {
     // Detect time gap from previous segment
@@ -370,8 +369,8 @@ function groupSegmentsIntoParagraphs(segments) {
     // Determine if we should start a new paragraph
     // Break on: speaker change, significant time gap, or too many segments
     const speakerChanged = seg.speaker !== currentPara.speaker && (seg.speaker || currentPara.speaker);
-    const significantTimeGap = timeGap >= TIME_GAP_THRESHOLD;
-    const tooManySegments = currentPara.segmentCount >= MAX_SEGMENTS_PER_PARAGRAPH;
+    const significantTimeGap = timeGap >= timeGapThreshold;
+    const tooManySegments = currentPara.segmentCount >= maxSegments;
 
     if (speakerChanged || significantTimeGap || tooManySegments) {
       if (currentPara.texts.length > 0) {
@@ -791,7 +790,7 @@ Use HTML formatting for structure:
       'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: OPENAI_MODEL,
       messages: [
         {
           role: 'system',
@@ -802,7 +801,7 @@ Use HTML formatting for structure:
           content: `Please summarize the following transcript:\n\n${truncatedText}`
         }
       ],
-      max_tokens: 1500,
+      max_tokens: OPENAI_MAX_TOKENS,
       temperature: 0.7
     })
   });
@@ -1198,5 +1197,5 @@ function showStatus(message, type) {
   statusMessage.className = `status-message ${type}`;
   setTimeout(() => {
     statusMessage.className = 'status-message';
-  }, 3000);
+  }, STATUS_MESSAGE_TIMEOUT_MS);
 }

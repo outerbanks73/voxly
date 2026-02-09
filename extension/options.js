@@ -1,11 +1,14 @@
 // Voxly - Options Script
+// SERVER_URL and other constants are defined in config.js
 
-const SERVER_URL = 'http://localhost:5123';
+// ExtensionPay for premium checks
+const extpay = ExtPay('voxly');
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   checkServerStatus();
   setupEventListeners();
+  setupCloudAuth();
 });
 
 function loadSettings() {
@@ -88,20 +91,15 @@ async function checkServerStatus() {
   const statusEl = document.getElementById('serverStatus');
   const statusText = document.getElementById('serverStatusText');
 
-  try {
-    const response = await fetch(`${SERVER_URL}/health`, { method: 'GET' });
-    if (response.ok) {
-      statusEl.className = 'server-status connected';
-      statusText.textContent = 'Connected';
-      return true;
-    }
-  } catch (e) {
-    // Connection failed
+  const connected = await checkServerConnection();
+  if (connected) {
+    statusEl.className = 'server-status connected';
+    statusText.textContent = 'Connected';
+  } else {
+    statusEl.className = 'server-status disconnected';
+    statusText.textContent = 'Not running';
   }
-
-  statusEl.className = 'server-status disconnected';
-  statusText.textContent = 'Not running';
-  return false;
+  return connected;
 }
 
 function setupEventListeners() {
@@ -119,7 +117,7 @@ function setupEventListeners() {
 
       setTimeout(() => {
         statusEl.className = 'status-message';
-      }, 3000);
+      }, STATUS_MESSAGE_TIMEOUT_MS);
     });
   });
 
@@ -182,7 +180,7 @@ function setupEventListeners() {
 
         setTimeout(() => {
           statusEl.className = 'status-message';
-        }, 3000);
+        }, STATUS_MESSAGE_TIMEOUT_MS);
       });
     });
   }
@@ -198,7 +196,7 @@ function setupEventListeners() {
 
       setTimeout(() => {
         statusEl.className = 'status-message';
-      }, 3000);
+      }, STATUS_MESSAGE_TIMEOUT_MS);
     });
   });
 
@@ -297,7 +295,190 @@ function setupEventListeners() {
 
       setTimeout(() => {
         statusEl.className = 'status-message';
-      }, 3000);
+      }, STATUS_MESSAGE_TIMEOUT_MS);
     });
   });
+}
+
+// ============================================================
+// Cloud Account (Supabase Auth)
+// ============================================================
+
+async function setupCloudAuth() {
+  // Check if user is already signed in
+  await updateCloudAuthUI();
+
+  // Listen for auth state changes from other contexts
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.action === 'cloudAuthStateChanged') {
+      updateCloudAuthUI();
+    }
+  });
+
+  // Sign in with Google
+  document.getElementById('signInGoogleBtn').addEventListener('click', async () => {
+    await handleOAuthSignIn('google');
+  });
+
+  // Sign in with GitHub
+  document.getElementById('signInGitHubBtn').addEventListener('click', async () => {
+    await handleOAuthSignIn('github');
+  });
+
+  // Sign in with email/password
+  document.getElementById('signInEmailBtn').addEventListener('click', async () => {
+    await handleEmailSignIn();
+  });
+
+  // Sign up with email/password
+  document.getElementById('signUpEmailBtn').addEventListener('click', async () => {
+    await handleEmailSignUp();
+  });
+
+  // Magic link
+  document.getElementById('magicLinkBtn').addEventListener('click', async () => {
+    await handleMagicLink();
+  });
+
+  // Sign out
+  document.getElementById('signOutBtn').addEventListener('click', async () => {
+    await cloudSignOut();
+    await updateCloudAuthUI();
+  });
+}
+
+async function handleOAuthSignIn(provider) {
+  const statusEl = document.getElementById('cloudAuthStatus');
+  statusEl.className = 'status-message success';
+  statusEl.textContent = 'Opening sign-in window...';
+
+  try {
+    await cloudSignInWithOAuth(provider);
+    await updateCloudAuthUI();
+    statusEl.className = 'status-message';
+  } catch (e) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = e.message === 'The user did not approve access.'
+      ? 'Sign-in cancelled.'
+      : `Sign-in failed: ${e.message}`;
+    setTimeout(() => { statusEl.className = 'status-message'; }, 5000);
+  }
+}
+
+async function handleEmailSignIn() {
+  const email = document.getElementById('cloudEmailInput').value.trim();
+  const password = document.getElementById('cloudPasswordInput').value;
+  const statusEl = document.getElementById('cloudAuthStatus');
+
+  if (!email || !password) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Please enter email and password.';
+    setTimeout(() => { statusEl.className = 'status-message'; }, 3000);
+    return;
+  }
+
+  try {
+    await cloudSignInWithEmail(email, password);
+    await updateCloudAuthUI();
+  } catch (e) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = `Sign-in failed: ${e.message}`;
+    setTimeout(() => { statusEl.className = 'status-message'; }, 5000);
+  }
+}
+
+async function handleEmailSignUp() {
+  const email = document.getElementById('cloudEmailInput').value.trim();
+  const password = document.getElementById('cloudPasswordInput').value;
+  const statusEl = document.getElementById('cloudAuthStatus');
+
+  if (!email || !password) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Please enter email and password.';
+    setTimeout(() => { statusEl.className = 'status-message'; }, 3000);
+    return;
+  }
+
+  if (password.length < 6) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Password must be at least 6 characters.';
+    setTimeout(() => { statusEl.className = 'status-message'; }, 3000);
+    return;
+  }
+
+  try {
+    const data = await cloudSignUpWithEmail(email, password);
+    if (data.user && !data.user.confirmed_at) {
+      statusEl.className = 'status-message success';
+      statusEl.textContent = 'Check your email to confirm your account.';
+    } else {
+      await updateCloudAuthUI();
+    }
+  } catch (e) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = `Sign-up failed: ${e.message}`;
+    setTimeout(() => { statusEl.className = 'status-message'; }, 5000);
+  }
+}
+
+async function handleMagicLink() {
+  const email = document.getElementById('cloudEmailInput').value.trim();
+  const statusEl = document.getElementById('cloudAuthStatus');
+
+  if (!email) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Please enter your email address.';
+    setTimeout(() => { statusEl.className = 'status-message'; }, 3000);
+    return;
+  }
+
+  try {
+    await cloudSignInWithMagicLink(email);
+    statusEl.className = 'status-message success';
+    statusEl.textContent = 'Magic link sent! Check your email.';
+  } catch (e) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = `Failed: ${e.message}`;
+    setTimeout(() => { statusEl.className = 'status-message'; }, 5000);
+  }
+}
+
+async function updateCloudAuthUI() {
+  const section = document.getElementById('cloudAccountSection');
+  const loggedOut = section.querySelector('.logged-out');
+  const loggedIn = section.querySelector('.logged-in');
+
+  const user = await getCloudUser();
+
+  if (user) {
+    loggedOut.style.display = 'none';
+    loggedIn.style.display = 'block';
+
+    const displayName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'User';
+    const email = user.email || '';
+    const avatarUrl = user.user_metadata?.avatar_url;
+
+    document.getElementById('cloudDisplayName').textContent = displayName;
+    document.getElementById('cloudEmail').textContent = email;
+
+    const avatarEl = document.getElementById('cloudAvatar');
+    if (avatarUrl) {
+      avatarEl.innerHTML = `<img src="${avatarUrl}" alt="${displayName}">`;
+    } else {
+      avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    }
+  } else {
+    loggedOut.style.display = 'block';
+    loggedIn.style.display = 'none';
+  }
+}
+
+// isPremiumUser for cloud feature gating
+async function isPremiumUser() {
+  try {
+    const user = await extpay.getUser();
+    return user.paid === true;
+  } catch (e) {
+    return false;
+  }
 }

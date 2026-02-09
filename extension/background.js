@@ -1,15 +1,21 @@
 // Voxly - Background Service Worker
-// Handles persistent job tracking, side panel management, and ExtensionPay
+// Handles persistent job tracking, side panel management, ExtensionPay, and cloud auth
 
-// Shared auth helper for authenticated server requests
+// Shared config and auth
+importScripts('config.js');
 importScripts('auth.js');
+
+// Supabase cloud auth
+importScripts('lib/supabase.min.js');
+importScripts('supabase.js');
+importScripts('cloud-auth.js');
 
 // Initialize ExtensionPay for premium subscriptions
 importScripts('ExtPay.js');
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
 extpay.startBackground();
 
-const SERVER_URL = 'http://localhost:5123';
+// SERVER_URL is defined in config.js
 
 // Active job state
 let activeJob = null; // { id, metadata, status, stage, progress, result, error }
@@ -23,6 +29,9 @@ chrome.runtime.onInstalled.addListener((details) => {
 
   // Enable side panel to open on action click
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
+  // Set up cloud session refresh alarm (every 55 min, tokens expire at 60)
+  chrome.alarms.create('refreshCloudSession', { periodInMinutes: 55 });
 });
 
 // Open side panel when extension icon is clicked
@@ -33,9 +42,8 @@ chrome.action.onClicked.addListener(async (tab) => {
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'checkServer') {
-    fetch(`${SERVER_URL}/health`)
-      .then(response => response.ok)
-      .then(ok => sendResponse({ connected: ok }))
+    checkServerConnection()
+      .then(connected => sendResponse({ connected }))
       .catch(() => sendResponse({ connected: false }));
     return true;
   }
@@ -71,6 +79,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'clearJob') {
     activeJob = null;
     sendResponse({ cleared: true });
+    return true;
+  }
+
+  if (request.action === 'getCloudAuthState') {
+    getCachedCloudAuthState()
+      .then(state => sendResponse({ state }))
+      .catch(() => sendResponse({ state: null }));
     return true;
   }
 });
@@ -139,7 +154,7 @@ async function pollJobStatus() {
       activeJob.downloadPercent = job.download_percent;
 
       // Continue polling after a short delay
-      setTimeout(pollJobStatus, 500);
+      setTimeout(pollJobStatus, POLLING_INTERVAL_MS);
     }
   } catch (e) {
     console.log('Poll error, retrying...', e);
@@ -152,5 +167,10 @@ async function pollJobStatus() {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'pollJob' && activeJob && activeJob.status === 'processing') {
     pollJobStatus();
+  }
+
+  // Refresh Supabase session to prevent token expiry
+  if (alarm.name === 'refreshCloudSession') {
+    refreshCloudSession().catch(e => console.log('Cloud session refresh error:', e));
   }
 });

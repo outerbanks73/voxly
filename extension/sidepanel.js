@@ -1,12 +1,7 @@
 // Voxly - Side Panel Script
 
-const SERVER_URL = 'http://localhost:5123';
-
 // ExtensionPay for premium subscriptions
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
-
-// Free tier limit
-const FREE_LIMIT = 15;
 
 // State
 let currentJobId = null;
@@ -69,13 +64,11 @@ const STREAMING_SITES = [
   'audiomack.com'
 ];
 
-// Current extension version
-const CURRENT_VERSION = '1.9.1';
-const GITHUB_REPO = 'outerbanks73/speaktotext-local'; // TODO: Consider renaming to 'voxly'
+// CURRENT_VERSION and GITHUB_REPO are defined in config.js
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-  await checkServerConnection();
+  await checkServerAndUpdateUI();
   setupTabs();
   setupFileUpload();
   setupButtons();
@@ -209,22 +202,17 @@ function showUpgradeModal() {
   }
 }
 
-// Check server connection
-async function checkServerConnection() {
-  try {
-    const response = await fetch(`${SERVER_URL}/health`, { method: 'GET' });
-    if (response.ok) {
-      statusBar.className = 'status-bar connected';
-      statusText.textContent = 'Server connected';
-      return true;
-    }
-  } catch (e) {
-    // Connection failed
+// Check server connection (delegates to shared checkServerConnection in config.js)
+async function checkServerAndUpdateUI() {
+  const connected = await checkServerConnection();
+  if (connected) {
+    statusBar.className = 'status-bar connected';
+    statusText.textContent = 'Server connected';
+  } else {
+    statusBar.className = 'status-bar disconnected';
+    statusText.textContent = 'Server not running. Start the local server first.';
   }
-
-  statusBar.className = 'status-bar disconnected';
-  statusText.textContent = 'Server not running. Start the local server first.';
-  return false;
+  return connected;
 }
 
 // Tab navigation
@@ -827,7 +815,7 @@ async function startRealtimeSession(stream) {
           console.error('Chunk transcription error:', e);
         }
       }
-    }, 5000);
+    }, CHUNK_INTERVAL_MS);
 
   } catch (e) {
     showError(`Real-time session failed: ${e.message}`);
@@ -1061,7 +1049,7 @@ function startProgressPolling() {
     } catch (e) {
       // Background not responding, will retry
     }
-  }, 500);
+  }, POLLING_INTERVAL_MS);
 }
 
 // UI helpers
@@ -1196,7 +1184,7 @@ function setupUrlTitlePreview() {
       return; // Invalid URL, don't fetch
     }
 
-    // Debounce: wait 600ms after user stops typing
+    // Debounce: wait after user stops typing
     debounceTimer = setTimeout(async () => {
       const preflight = await preflightCheck(url);
       if (preflight && preflight.title && !preflight.error) {
@@ -1204,7 +1192,7 @@ function setupUrlTitlePreview() {
       } else {
         hideVideoTitle();
       }
-    }, 600);
+    }, DEBOUNCE_DELAY_MS);
   });
 }
 

@@ -116,7 +116,7 @@ def load_settings():
         try:
             with open(SETTINGS_FILE) as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError):
             pass
     return {}
 
@@ -241,8 +241,8 @@ def cleanup_cache():
         for cache_file in CACHE_DIR.glob("*.mp3"):
             if now - cache_file.stat().st_mtime > CACHE_MAX_AGE:
                 cache_file.unlink(missing_ok=True)
-    except Exception:
-        pass  # Ignore cache cleanup errors
+    except OSError:
+        pass  # Ignore cache cleanup errors (permissions, missing files, etc.)
 
 
 # ============================================================
