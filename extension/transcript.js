@@ -86,8 +86,17 @@ function updateTranscriptPreview() {
   }
 }
 
-// Make toggleSection available globally for onclick handlers
-window.toggleSection = toggleSection;
+// Setup section header click handlers (avoiding inline onclick for CSP compliance)
+function setupSectionHeaders() {
+  const summaryHeader = document.getElementById('summaryHeader');
+  if (summaryHeader) {
+    summaryHeader.addEventListener('click', () => toggleSection('summary'));
+  }
+  const transcriptHeader = document.getElementById('transcriptHeader');
+  if (transcriptHeader) {
+    transcriptHeader.addEventListener('click', () => toggleSection('transcript'));
+  }
+}
 
 // DOM Elements
 const transcriptContainer = document.getElementById('transcriptContainer');
@@ -117,6 +126,7 @@ const clearBtn = document.getElementById('clearBtn');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+  setupSectionHeaders();
   await loadTranscriptData();
   setupButtons();
   setupFormatToggle();
@@ -821,7 +831,7 @@ function toggleMetadataEdit() {
   });
 
   editMetaBtn.classList.toggle('active', isEditingMetadata);
-  editMetaBtn.textContent = isEditingMetadata ? '💾 Save Metadata' : '✏️ Edit Metadata';
+  editMetaBtn.textContent = isEditingMetadata ? '💾 Save' : '✏️ Edit';
 
   if (!isEditingMetadata) {
     saveMetadataEdits();

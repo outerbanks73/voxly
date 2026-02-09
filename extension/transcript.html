@@ -186,7 +186,7 @@
     /* Format Toggle */
     .format-bar {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: center;
       margin-bottom: 12px;
       flex-wrap: wrap;
@@ -198,6 +198,7 @@
       background: #e8f0f8;
       border-radius: 8px;
       padding: 3px;
+      margin: 8px 16px 0;
     }
 
     .format-btn {
@@ -822,17 +823,11 @@
           <span class="stat">🤖 Model: <span id="metaModel" class="stat-value">-</span></span>
         </div>
 
-        <button class="edit-meta-btn" id="editMetaBtn">✏️ Edit Metadata</button>
+        <button class="edit-meta-btn" id="editMetaBtn">✏️ Edit</button>
       </div>
 
-      <!-- Format Toggle & Action Bar -->
+      <!-- Action Bar -->
       <div class="format-bar">
-        <div class="format-toggle">
-          <button class="format-btn" data-format="segmented">Segmented Timestamps</button>
-          <button class="format-btn active" data-format="paragraph">Full Transcript</button>
-          <button class="format-btn" data-format="prose">No Timestamps</button>
-        </div>
-
         <div class="action-bar">
           <button class="btn btn-primary" id="summarizeBtn">✨ Regenerate Summary</button>
           <div class="export-dropdown">
@@ -852,7 +847,7 @@
 
       <!-- AI Summary Section (Collapsible) -->
       <div id="summarySection" class="content-section" style="display: none;">
-        <div class="section-header" onclick="toggleSection('summary')">
+        <div class="section-header" id="summaryHeader">
           <h3>📝 AI Summary</h3>
           <span class="expand-icon">▼</span>
         </div>
@@ -868,9 +863,14 @@
 
       <!-- Transcript Section (Collapsible) -->
       <div id="transcriptSection" class="content-section expanded">
-        <div class="section-header" onclick="toggleSection('transcript')">
+        <div class="section-header" id="transcriptHeader">
           <h3 id="transcriptLabel">📄 Full Transcript</h3>
           <span class="expand-icon">▼</span>
+        </div>
+        <div class="format-toggle">
+          <button class="format-btn" data-format="segmented">Segmented Timestamps</button>
+          <button class="format-btn active" data-format="paragraph">Full Transcript</button>
+          <button class="format-btn" data-format="prose">No Timestamps</button>
         </div>
         <div class="section-preview" id="transcriptPreview">
           Click to expand and view full transcript...
@@ -886,7 +886,7 @@
         </div>
         <div class="section-actions">
           <button class="btn btn-secondary" id="editBtn">✏️ Edit</button>
-          <button class="btn btn-primary" id="copyBtn">📋 Copy</button>
+          <button class="btn btn-secondary" id="copyBtn">📋 Copy</button>
         </div>
       </div>
 
