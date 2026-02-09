@@ -253,3 +253,62 @@ async function fetchCloudTranscript(transcriptId) {
   if (error) throw error;
   return data;
 }
+
+// ============================================================
+// API Key Management
+// ============================================================
+
+// Create a new API key (returns the raw key — only shown once)
+async function createApiKey(name = 'Default') {
+  const sb = getSupabase();
+  const user = await getCloudUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // Generate a random API key: vxly_{32 hex chars}
+  const rawKey = 'vxly_' + Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  // Hash the key for storage (SHA-256)
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawKey));
+  const keyHash = Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  const keyPrefix = rawKey.substring(0, 10);
+
+  const { data, error } = await sb.from('api_keys').insert({
+    user_id: user.id,
+    key_hash: keyHash,
+    key_prefix: keyPrefix,
+    name: name
+  }).select('id, key_prefix, name, created_at').single();
+
+  if (error) throw error;
+  return { ...data, raw_key: rawKey };
+}
+
+// List active API keys for the current user
+async function listApiKeys() {
+  const sb = getSupabase();
+  const user = await getCloudUser();
+  if (!user) return [];
+
+  const { data, error } = await sb
+    .from('api_keys')
+    .select('id, key_prefix, name, last_used, created_at')
+    .eq('user_id', user.id)
+    .is('revoked_at', null)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+// Revoke an API key
+async function revokeApiKey(keyId) {
+  const sb = getSupabase();
+  const { error } = await sb.from('api_keys')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', keyId);
+  if (error) throw error;
+}

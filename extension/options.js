@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkServerStatus();
   setupEventListeners();
   setupCloudAuth();
+  setupApiKeys();
 });
 
 function loadSettings() {
@@ -471,6 +472,9 @@ async function updateCloudAuthUI() {
     loggedOut.style.display = 'block';
     loggedIn.style.display = 'none';
   }
+
+  // Refresh API keys section based on auth state
+  setupApiKeys();
 }
 
 // isPremiumUser for cloud feature gating
@@ -481,4 +485,120 @@ async function isPremiumUser() {
   } catch (e) {
     return false;
   }
+}
+
+// ============================================================
+// API Key Management
+// ============================================================
+
+async function setupApiKeys() {
+  const section = document.getElementById('apiKeysSection');
+  const user = await getCloudUser();
+
+  // Only show API keys section for logged-in users
+  if (!user) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+
+  // Create key
+  document.getElementById('createApiKeyBtn').addEventListener('click', handleCreateApiKey);
+
+  // Copy new key
+  document.getElementById('copyNewKeyBtn').addEventListener('click', async () => {
+    const input = document.getElementById('newKeyValue');
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showApiKeyStatus('Key copied to clipboard!', 'success');
+    } catch (e) {
+      showApiKeyStatus('Failed to copy', 'error');
+    }
+  });
+
+  // Load existing keys
+  await loadApiKeys();
+}
+
+async function handleCreateApiKey() {
+  const nameInput = document.getElementById('apiKeyNameInput');
+  const name = nameInput.value.trim() || 'Default';
+
+  try {
+    const result = await createApiKey(name);
+
+    // Show the raw key (only time it's visible)
+    const display = document.getElementById('newKeyDisplay');
+    const keyInput = document.getElementById('newKeyValue');
+    display.style.display = 'block';
+    keyInput.value = result.raw_key;
+
+    nameInput.value = '';
+    showApiKeyStatus('API key created! Copy it now.', 'success');
+
+    // Reload the list
+    await loadApiKeys();
+  } catch (e) {
+    showApiKeyStatus(`Failed to create key: ${e.message}`, 'error');
+  }
+}
+
+async function loadApiKeys() {
+  const listEl = document.getElementById('apiKeysList');
+  listEl.innerHTML = '';
+
+  try {
+    const keys = await listApiKeys();
+
+    if (keys.length === 0) {
+      listEl.innerHTML = '<p style="font-size: 13px; color: #6b6b6b;">No API keys yet.</p>';
+      return;
+    }
+
+    keys.forEach(key => {
+      const item = document.createElement('div');
+      item.className = 'api-key-item';
+
+      const created = new Date(key.created_at).toLocaleDateString();
+      const lastUsed = key.last_used ? new Date(key.last_used).toLocaleDateString() : 'Never';
+
+      item.innerHTML = `
+        <div class="key-info">
+          <span class="key-name">${escapeHtml(key.name)}</span>
+          <span class="key-meta"><code>${key.key_prefix}...</code> &middot; Created ${created} &middot; Last used: ${lastUsed}</span>
+        </div>
+        <button class="btn-revoke" data-key-id="${key.id}">Revoke</button>
+      `;
+
+      item.querySelector('.btn-revoke').addEventListener('click', async () => {
+        if (confirm(`Revoke API key "${key.name}"? This cannot be undone.`)) {
+          try {
+            await revokeApiKey(key.id);
+            showApiKeyStatus('Key revoked', 'success');
+            await loadApiKeys();
+          } catch (e) {
+            showApiKeyStatus(`Failed: ${e.message}`, 'error');
+          }
+        }
+      });
+
+      listEl.appendChild(item);
+    });
+  } catch (e) {
+    listEl.innerHTML = `<p style="font-size: 13px; color: #dc3545;">Failed to load keys: ${e.message}</p>`;
+  }
+}
+
+function showApiKeyStatus(message, type) {
+  const el = document.getElementById('apiKeyStatus');
+  el.className = `status-message ${type}`;
+  el.textContent = message;
+  setTimeout(() => { el.className = 'status-message'; }, 5000);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }

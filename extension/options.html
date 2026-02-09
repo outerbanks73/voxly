@@ -394,6 +394,53 @@
       font-family: monospace;
       font-size: 12px;
     }
+
+    /* API Key items */
+    .api-key-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border: 1px solid #d4e4f4;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .api-key-item .key-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .api-key-item .key-name {
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .api-key-item .key-meta {
+      font-size: 12px;
+      color: #6b6b6b;
+      margin-top: 2px;
+    }
+
+    .api-key-item .key-meta code {
+      font-size: 11px;
+    }
+
+    .btn-revoke {
+      background: none;
+      border: 1px solid #dc3545;
+      color: #dc3545;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .btn-revoke:hover {
+      background: #dc3545;
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -450,6 +497,37 @@
           </div>
           <div class="status-message" id="cloudAuthStatus2"></div>
         </div>
+      </div>
+
+      <!-- API Keys (Developer Access) -->
+      <div class="section" id="apiKeysSection" style="display: none;">
+        <h2>API Keys</h2>
+        <p style="font-size: 14px; margin-bottom: 16px; color: #6b6b6b;">
+          Create API keys to access your transcripts programmatically. Use them to download transcripts or submit new ones via the REST API.
+        </p>
+
+        <div class="form-group">
+          <label>Create New API Key</label>
+          <div class="input-group">
+            <input type="text" id="apiKeyNameInput" placeholder="Key name (e.g., My Script)">
+            <button class="btn btn-primary" id="createApiKeyBtn">Create Key</button>
+          </div>
+        </div>
+
+        <!-- Newly created key display (shown once) -->
+        <div id="newKeyDisplay" class="info-box" style="display: none; margin-bottom: 16px; background: #d4edda; border-color: #28a745;">
+          <h3 style="color: #155724;">New API Key Created</h3>
+          <p style="color: #155724;">Copy this key now. You won't be able to see it again.</p>
+          <div class="input-group" style="margin-top: 8px;">
+            <input type="text" id="newKeyValue" readonly style="font-family: monospace; font-size: 13px;">
+            <button class="btn btn-secondary" id="copyNewKeyBtn">Copy</button>
+          </div>
+        </div>
+
+        <!-- Existing keys list -->
+        <div id="apiKeysList" style="margin-top: 12px;"></div>
+
+        <div class="status-message" id="apiKeyStatus"></div>
       </div>
 
       <!-- Server Status -->
@@ -594,6 +672,7 @@
   <script src="auth.js"></script>
   <script src="supabase.js"></script>
   <script src="cloud-auth.js"></script>
+  <script src="cloud-sync.js"></script>
   <script src="ExtPay.js"></script>
   <script src="options.js"></script>
 </body>
