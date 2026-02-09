@@ -46,14 +46,58 @@
   - All other scripts (update.sh, install.sh) should invoke these scripts rather than managing processes directly
   - Never duplicate process management logic - single source of truth
 
+## Supabase Cloud Architecture (v2.0.0)
+
+### Architecture: Extension talks directly to Supabase
+- Server stays transcription-only — no cloud dependencies in Python
+- Extension handles all Supabase communication (auth, storage, sync)
+- This enables future remote model swap without untangling storage
+
+### Script Loading Order (HTML pages)
+```
+supabase.min.js → config.js → auth.js → supabase.js → cloud-auth.js → cloud-sync.js → ExtPay.js → [page].js
+```
+Functions are defined at load time but only called at runtime, so `isPremiumUser()` (defined in the page-specific JS after ExtPay) is available when `canUseCloudFeatures()` executes.
+
+### Auth Flow
+1. OAuth: `chrome.identity.launchWebAuthFlow()` → Supabase OAuth URL → parse hash tokens → `setSession()`
+2. Session stored via custom `chromeStorageAdapter` in `chrome.storage.local` (service workers can't use localStorage)
+3. Background alarm refreshes session every 55 min (tokens expire at 60)
+4. `canUseCloudFeatures()` requires both `isPremiumUser()` AND `isCloudAuthenticated()`
+
+### Cloud Sync
+- Auto-sync after transcription completes (`trySyncOrQueue()`)
+- Offline queue in `chrome.storage.local.pendingSyncQueue`, retried every 5 min (max 10)
+- Cloud features are opt-in — local-only mode fully preserved
+
+### Key Cloud Files
+- `extension/supabase.js` - Client singleton with chrome.storage.local adapter
+- `extension/cloud-auth.js` - OAuth, email, magic link auth flows
+- `extension/cloud-sync.js` - Sync, fetch, share, API key CRUD functions
+- `extension/library.html/js` - Transcript library (search, pagination, shared tab)
+- `extension/share.html/js` - Public share viewer (no auth needed)
+- `supabase/migrations/001_initial_schema.sql` - Full DB schema with RLS
+- `supabase/functions/api-transcripts/index.ts` - Edge Function for developer API
+
+### Database Tables
+- `profiles` - Auto-created on signup via trigger
+- `transcripts` - User transcripts with full-text search index
+- `transcript_shares` - User-to-user sharing with read/write permissions
+- `api_keys` - Developer API keys (SHA-256 hashed, prefix stored)
+
+### RLS
+Row Level Security is enabled on ALL tables. `user_id` filtering on all policies. Anon key can only read public shares.
+
 ## Project Structure
 - `/extension/` - Chrome extension (Manifest V3)
 - `/server/` - Python FastAPI backend with Whisper transcription
+- `/supabase/` - Database migrations and Edge Functions
 - `start-server.sh` / `stop-server.sh` - Server lifecycle management
 - `install.sh` / `update.sh` - Installation and update scripts
 
 ## Key Files
 - `extension/background.js` - Service worker (ephemeral, save state to storage)
 - `extension/sidepanel.js` - UI (check storage on load for recovered results)
+- `extension/config.js` - Shared constants (SUPABASE_URL, SUPABASE_ANON_KEY, etc.)
 - `server/server.py` - FastAPI server (use sys.executable, not hardcoded paths)
 - `server/worker.py` - Transcription worker (generous timeouts for long operations)
