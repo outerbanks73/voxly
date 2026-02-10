@@ -4,8 +4,6 @@
 const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extension ID
 
 // State
-let currentJobId = null;
-let pollInterval = null;
 let selectedFile = null;
 let mediaRecorder = null;
 let recordedChunks = [];
@@ -13,10 +11,13 @@ let recordingStartTime = null;
 let recordingTimer = null;
 let currentResult = null; // Store the result for export
 let currentMetadata = null; // Store metadata for enriched exports
-let realtimeSessionId = null;
-let realtimeChunkInterval = null;
-let realtimeChunkCount = 0;
 let isRealtimeMode = false;
+
+// Realtime WebSocket state
+let realtimeSocket = null;
+let realtimeAudioContext = null;
+let realtimeProcessor = null;
+let realtimeSegments = [];
 
 // DOM Elements
 const statusBar = document.getElementById('statusBar');
@@ -61,14 +62,19 @@ const STREAMING_SITES = [
   'tidal.com',
   'bandcamp.com',
   'mixcloud.com',
-  'audiomack.com'
+  'audiomack.com',
+  'tiktok.com',
+  'instagram.com',
+  'x.com',
+  'twitter.com',
+  'facebook.com'
 ];
 
 // CURRENT_VERSION and GITHUB_REPO are defined in config.js
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-  await checkServerAndUpdateUI();
+  await checkCloudStatusAndUpdateUI();
   setupTabs();
   setupFileUpload();
   setupButtons();
@@ -77,7 +83,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await autoPopulateUrl();
   await updateUsageIndicator();
   checkForUpdates();
-  await checkActiveJob(); // Check if there's an in-progress job from before
   updateLibraryLink(); // Show library link if cloud user
 });
 
@@ -203,17 +208,23 @@ function showUpgradeModal() {
   }
 }
 
-// Check server connection (delegates to shared checkServerConnection in config.js)
-async function checkServerAndUpdateUI() {
-  const connected = await checkServerConnection();
-  if (connected) {
-    statusBar.className = 'status-bar connected';
-    statusText.textContent = 'Server connected';
-  } else {
+// Check cloud authentication status and update UI
+async function checkCloudStatusAndUpdateUI() {
+  try {
+    const authenticated = await isCloudAuthenticated();
+    if (authenticated) {
+      statusBar.className = 'status-bar connected';
+      statusText.textContent = 'Cloud ready';
+    } else {
+      statusBar.className = 'status-bar disconnected';
+      statusText.textContent = 'Sign in required';
+    }
+    return authenticated;
+  } catch (e) {
     statusBar.className = 'status-bar disconnected';
-    statusText.textContent = 'Server not running. Start the local server first.';
+    statusText.textContent = 'Sign in required';
+    return false;
   }
-  return connected;
 }
 
 // Tab navigation
@@ -298,385 +309,102 @@ function setupButtons() {
   });
 }
 
-// Get HF token from storage
-async function getHfToken() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['hfToken'], (result) => {
-      resolve(result.hfToken || '');
-    });
-  });
-}
-
-// Transcribe file with auto model selection
+// Transcribe file via cloud (Deepgram Nova-2)
 async function transcribeFile(file) {
-  // Check usage limit first
-  if (!await checkUsageLimit()) {
+  if (!await checkUsageLimit()) return;
+
+  const authenticated = await isCloudAuthenticated();
+  if (!authenticated) {
+    showError('Please sign in to use cloud transcription. Go to Settings to sign in.');
     return;
   }
 
-  const connected = await checkServerConnection();
-  if (!connected) {
-    showError('Server not running. Please start the local server first.');
-    return;
-  }
-
-  // Clear any stale results before starting new transcription
   hideError();
   hideResult();
   currentResult = null;
   currentMetadata = null;
   showProgress('Uploading file...');
 
-  // Use 'base' as default for files (server will handle it)
-  const model = 'base';
-
-  // Initialize metadata for this transcription
   currentMetadata = {
     source: file.name,
     source_type: 'file',
-    model: model,
+    extraction_method: 'cloud',
     processed_at: new Date().toISOString()
   };
 
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('model', model);
-
-  const hfToken = await getHfToken();
-  if (hfToken) {
-    formData.append('hf_token', hfToken);
-  }
-
   try {
-    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/file`, {
-      method: 'POST',
-      body: formData
+    const result = await transcriptionService.transcribeFile(file, (progress) => {
+      updateProgress(progress);
     });
-
-    const data = await response.json();
-    if (data.job_id) {
-      currentJobId = data.job_id;
-      // Hand off to background for persistent polling
-      chrome.runtime.sendMessage({
-        action: 'trackJob',
-        jobId: data.job_id,
-        metadata: currentMetadata
-      });
-      startProgressPolling();
-    } else {
-      showError('Failed to start transcription');
-      hideProgress();
-      hideResult(); // Ensure stale results aren't shown
-    }
-  } catch (e) {
-    showError(`Error: ${e.message}`);
-    hideProgress();
-    hideResult(); // Ensure stale results aren't shown
-  }
-}
-
-// Pre-flight check to get video duration and info
-async function preflightCheck(url) {
-  try {
-    const formData = new FormData();
-    formData.append('url', url);
-
-    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/preflight`, {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      return { error: `Server returned ${response.status}: ${errorText}` };
-    }
-
-    return await response.json();
-  } catch (e) {
-    console.error('Preflight check failed:', e);
-    return { error: e.message };
-  }
-}
-
-// Show pre-flight confirmation dialog for videos
-function showPreflightDialog(preflight) {
-  return new Promise((resolve) => {
-    const dialog = document.getElementById('preflightDialog');
-    const title = document.getElementById('preflightTitle');
-    const duration = document.getElementById('preflightDuration');
-    const estimate = document.getElementById('preflightEstimate');
-    const confirmBtn = document.getElementById('preflightConfirm');
-    const cancelBtn = document.getElementById('preflightCancel');
-    const extractBtn = document.getElementById('preflightExtract');
-
-    // YouTube transcript elements
-    const ytOption = document.getElementById('youtubeTranscriptOption');
-    const transcriptType = document.getElementById('transcriptType');
-    const transcriptLang = document.getElementById('transcriptLanguage');
-    const langSelector = document.getElementById('languageSelector');
-    const langSelect = document.getElementById('transcriptLanguageSelect');
-
-    // Truncate title if too long
-    const displayTitle = preflight.title.length > 40
-      ? preflight.title.substring(0, 37) + '...'
-      : preflight.title;
-
-    title.textContent = displayTitle;
-    duration.textContent = preflight.duration_formatted;
-
-    // Show estimate for recommended model
-    const recommendedModel = preflight.recommended_model;
-    const estTime = preflight.estimates[recommendedModel]?.formatted || 'Unknown';
-    estimate.textContent = `~${estTime}`;
-
-    // Check for YouTube transcript availability
-    const ytTranscript = preflight.youtube_transcript;
-    if (ytTranscript && ytTranscript.available && ytTranscript.transcripts.length > 0) {
-      ytOption.style.display = 'block';
-      extractBtn.style.display = 'inline-block';
-
-      // Find the primary transcript (prefer manual over auto-generated)
-      const primaryTranscript = ytTranscript.transcripts.find(t => !t.is_generated)
-        || ytTranscript.transcripts[0];
-
-      transcriptType.textContent = primaryTranscript.is_generated
-        ? '🤖 Auto-generated'
-        : '✍️ Manual captions';
-      transcriptLang.textContent = primaryTranscript.language;
-
-      // Show language selector if multiple languages available
-      if (ytTranscript.transcripts.length > 1) {
-        langSelector.style.display = 'block';
-        langSelect.innerHTML = '';
-        ytTranscript.transcripts.forEach(t => {
-          const option = document.createElement('option');
-          option.value = t.language_code;
-          option.textContent = `${t.language} ${t.is_generated ? '(auto)' : '(manual)'}`;
-          langSelect.appendChild(option);
-        });
-        // Pre-select the primary transcript
-        langSelect.value = primaryTranscript.language_code;
-      } else {
-        langSelector.style.display = 'none';
-      }
-
-      // Update confirm button text to clarify options
-      confirmBtn.textContent = `🎤 Whisper (~${estTime})`;
-    } else {
-      ytOption.style.display = 'none';
-      extractBtn.style.display = 'none';
-      confirmBtn.textContent = '🎤 Transcribe';
-    }
-
-    dialog.style.display = 'flex';
-
-    const cleanup = () => {
-      dialog.style.display = 'none';
-      confirmBtn.onclick = null;
-      cancelBtn.onclick = null;
-      extractBtn.onclick = null;
-    };
-
-    // User chooses Whisper transcription
-    confirmBtn.onclick = () => {
-      cleanup();
-      resolve({ ...preflight, useWhisper: true });
-    };
-
-    // User chooses instant YouTube transcript extraction
-    extractBtn.onclick = () => {
-      cleanup();
-      const selectedLang = langSelect?.value || null;
-      resolve({
-        ...preflight,
-        useWhisper: false,
-        extractTranscript: true,
-        selectedLanguage: selectedLang
-      });
-    };
-
-    cancelBtn.onclick = () => {
-      cleanup();
-      resolve(null);
-    };
-  });
-}
-
-// Extract YouTube transcript directly (instant)
-async function extractYoutubeTranscript(url, languageCode = null, preflight = {}) {
-  // Note: Usage already checked in transcribeUrl before calling this
-
-  const connected = await checkServerConnection();
-  if (!connected) {
-    showError('Server not running. Please start the local server first.');
-    return;
-  }
-
-  // Clear any stale results before starting new extraction
-  hideError();
-  hideResult();
-  currentResult = null;
-  currentMetadata = null;
-  showProgress('Extracting transcript...');
-
-  const formData = new FormData();
-  formData.append('url', url);
-  if (languageCode) {
-    formData.append('language_code', languageCode);
-  }
-
-  try {
-    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/youtube/transcript`, {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || 'Failed to extract transcript');
-    }
-
-    const data = await response.json();
 
     hideProgress();
+    currentResult = result;
 
-    // Store result in same format as Whisper results
-    currentResult = data.result;
-    currentMetadata = {
-      source: url,
-      source_type: 'youtube_transcript',
-      title: preflight.title || url,
-      uploader: preflight.uploader || '',
-      upload_date: preflight.upload_date || '',
-      duration_seconds: preflight.duration_seconds,
-      duration: preflight.duration_formatted,
-      language: data.language,
-      transcript_type: data.transcript_type, // 'auto-generated' or 'manual'
-      processed_at: new Date().toISOString(),
-      extraction_method: 'youtube_transcript_api'
-    };
+    if (result.language) currentMetadata.language = result.language;
+    if (result.duration) currentMetadata.duration_seconds = result.duration;
 
-    // Save to storage
     await chrome.storage.local.set({
       transcriptResult: currentResult,
       transcriptMetadata: currentMetadata
     });
 
     showResult(currentResult);
-    incrementUsage(); // Count successful extraction
-    trySyncOrQueue(currentResult, currentMetadata); // Cloud sync (silent, non-blocking)
-
+    incrementUsage();
+    trySyncOrQueue(currentResult, currentMetadata);
   } catch (e) {
     hideProgress();
-    hideResult(); // Ensure stale results aren't shown
-    showError(`Transcript extraction failed: ${e.message}`);
+    hideResult();
+    showError(`Transcription failed: ${e.message}`);
   }
 }
 
-// Transcribe URL with smart model selection
+// Transcribe URL via cloud (Supadata)
 async function transcribeUrl(url) {
-  // Check usage limit first
-  if (!await checkUsageLimit()) {
+  if (!await checkUsageLimit()) return;
+
+  const authenticated = await isCloudAuthenticated();
+  if (!authenticated) {
+    showError('Please sign in to use cloud transcription. Go to Settings to sign in.');
     return;
   }
 
-  const connected = await checkServerConnection();
-  if (!connected) {
-    showError('Server not running. Please start the local server first.');
-    return;
-  }
-
-  // Clear any stale results before starting new transcription
   hideError();
   hideResult();
   currentResult = null;
   currentMetadata = null;
-  showProgress('Checking video info...');
+  showProgress('Transcribing URL...');
 
-  // Do preflight check to get duration and transcript availability
-  const preflight = await preflightCheck(url);
-
-  if (preflight.error) {
-    hideProgress();
-    showError(preflight.error);
-    return;
-  }
-
-  // Always show preflight dialog before transcription
-  hideProgress();
-  const confirmed = await showPreflightDialog(preflight);
-  if (!confirmed) {
-    return; // User cancelled
-  }
-
-  // Check if user chose to extract YouTube transcript
-  if (confirmed.extractTranscript) {
-    await extractYoutubeTranscript(url, confirmed.selectedLanguage, preflight);
-    return;
-  }
-
-  // Otherwise, proceed with Whisper transcription
-  showProgress('Starting transcription...');
-
-  // Initialize metadata for this transcription
-  const model = preflight.recommended_model || 'base';
   currentMetadata = {
     source: url,
     source_type: 'url',
-    model: model,
-    duration_seconds: preflight.duration_seconds,
-    duration: preflight.duration_formatted,
-    title: preflight.title,
-    uploader: preflight.uploader || '',
-    upload_date: preflight.upload_date || '',
+    extraction_method: 'cloud',
     processed_at: new Date().toISOString()
   };
 
-  const formData = new FormData();
-  formData.append('url', url);
-  formData.append('model', 'auto'); // Let server pick the model
-
-  // Pass duration if we have it (enables smart selection on server)
-  if (preflight.duration_seconds) {
-    formData.append('duration_seconds', preflight.duration_seconds);
-  }
-
-  const hfToken = await getHfToken();
-  if (hfToken) {
-    formData.append('hf_token', hfToken);
-  }
-
   try {
-    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/url`, {
-      method: 'POST',
-      body: formData
+    const result = await transcriptionService.transcribeUrl(url, (progress) => {
+      updateProgress(progress);
     });
 
-    const data = await response.json();
-    if (data.job_id) {
-      currentJobId = data.job_id;
-
-      // Update metadata with server's model choice
-      if (data.model) {
-        currentMetadata.model = data.model;
-      }
-
-      // Hand off to background for persistent polling
-      chrome.runtime.sendMessage({
-        action: 'trackJob',
-        jobId: data.job_id,
-        metadata: currentMetadata
-      });
-      startProgressPolling();
-    } else {
-      showError(data.error || 'Failed to start transcription');
-      hideProgress();
-      hideResult(); // Ensure stale results aren't shown
-    }
-  } catch (e) {
-    showError(`Error: ${e.message}`);
     hideProgress();
-    hideResult(); // Ensure stale results aren't shown
+    currentResult = result;
+
+    if (result.title) currentMetadata.title = result.title;
+    if (result.language) currentMetadata.language = result.language;
+    if (result.duration) currentMetadata.duration_seconds = result.duration;
+
+    await chrome.storage.local.set({
+      transcriptResult: currentResult,
+      transcriptMetadata: currentMetadata
+    });
+
+    showResult(currentResult);
+    incrementUsage();
+    trySyncOrQueue(currentResult, currentMetadata);
+  } catch (e) {
+    hideProgress();
+    hideResult();
+    showError(`Transcription failed: ${e.message}`);
   }
 }
 
@@ -704,7 +432,7 @@ async function startRecording() {
     recordedChunks = [];
 
     if (isRealtimeMode) {
-      // Real-time mode: start session and send chunks periodically
+      // Real-time mode: stream to Deepgram WebSocket
       await startRealtimeSession(stream);
     } else {
       // Standard mode: record everything, transcribe at end
@@ -738,16 +466,11 @@ async function startRecording() {
     }
 
     // Start timer
-    realtimeChunkCount = 0; // Reset chunk counter
     recordingTimer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
       const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
       const secs = (elapsed % 60).toString().padStart(2, '0');
-      const timeDisplay = `${mins}:${secs}`;
-      // Show chunk count in real-time mode
-      document.getElementById('recordingTime').textContent = isRealtimeMode
-        ? `${timeDisplay} (${realtimeChunkCount} chunks)`
-        : timeDisplay;
+      document.getElementById('recordingTime').textContent = `${mins}:${secs}`;
     }, 1000);
 
   } catch (e) {
@@ -755,123 +478,160 @@ async function startRecording() {
   }
 }
 
-// Start real-time transcription session
+// Start real-time transcription session via Deepgram WebSocket
 async function startRealtimeSession(stream) {
-  // Use 'tiny' for real-time mode (needs to be fast)
-  const model = 'tiny';
-
   try {
-    // Start session on server
-    const formData = new FormData();
-    formData.append('model', model);
+    // Get temporary Deepgram key from Edge Function
+    const { key } = await transcriptionService.getRealtimeToken();
 
-    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/realtime/start`, {
-      method: 'POST',
-      body: formData
-    });
+    // Open WebSocket to Deepgram
+    const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=16000`;
+    realtimeSocket = new WebSocket(wsUrl, ['token', key]);
 
-    const data = await response.json();
-    realtimeSessionId = data.session_id;
+    realtimeSegments = [];
 
-    // Create media recorder for chunks
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-
-    let chunkBuffer = [];
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunkBuffer.push(e.data);
-        recordedChunks.push(e.data); // Also keep for final transcript
-      }
+    realtimeSocket.onopen = () => {
+      console.log('[Voxly] Deepgram WebSocket connected');
     };
 
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach(track => track.stop());
-      await stopRealtimeSession();
-    };
-
-    // Start recording with smaller chunks for real-time
-    mediaRecorder.start(1000);
-
-    // Send chunks every 5 seconds for transcription
-    realtimeChunkInterval = setInterval(async () => {
-      if (chunkBuffer.length > 0 && realtimeSessionId) {
-        const blob = new Blob(chunkBuffer, { type: 'audio/webm' });
-        chunkBuffer = [];
-
-        try {
-          const formData = new FormData();
-          formData.append('chunk', blob, 'chunk.webm');
-
-          const response = await authenticatedFetch(`${SERVER_URL}/transcribe/realtime/chunk/${realtimeSessionId}`, {
-            method: 'POST',
-            body: formData
+    realtimeSocket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'Results') {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (transcript && data.is_final) {
+          realtimeSegments.push({
+            text: transcript,
+            start: data.start,
+            end: data.start + data.duration
           });
-
-          const result = await response.json();
-          if (result.transcript) {
-            realtimeChunkCount++;
-            updateRealtimeTranscript(result.all_transcripts);
-          }
-        } catch (e) {
-          console.error('Chunk transcription error:', e);
+          updateRealtimeTranscript(realtimeSegments);
+        } else if (transcript) {
+          // Interim result — show it as pending
+          updateRealtimeTranscriptInterim(transcript);
         }
       }
-    }, CHUNK_INTERVAL_MS);
+    };
+
+    realtimeSocket.onerror = (e) => {
+      console.error('[Voxly] Deepgram WebSocket error:', e);
+    };
+
+    realtimeSocket.onclose = () => {
+      console.log('[Voxly] Deepgram WebSocket closed');
+    };
+
+    // Create AudioContext at 16kHz and ScriptProcessorNode for PCM conversion
+    realtimeAudioContext = new AudioContext({ sampleRate: 16000 });
+    const source = realtimeAudioContext.createMediaStreamSource(stream);
+    realtimeProcessor = realtimeAudioContext.createScriptProcessor(4096, 1, 1);
+
+    realtimeProcessor.onaudioprocess = (e) => {
+      if (realtimeSocket?.readyState === WebSocket.OPEN) {
+        const float32 = e.inputBuffer.getChannelData(0);
+        // Convert float32 to int16 PCM
+        const int16 = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          const s = Math.max(-1, Math.min(1, float32[i]));
+          int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        realtimeSocket.send(int16.buffer);
+      }
+    };
+
+    source.connect(realtimeProcessor);
+    realtimeProcessor.connect(realtimeAudioContext.destination);
+
+    // Also keep MediaRecorder for the full recording blob (standard stop path)
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+    mediaRecorder.start(1000);
 
   } catch (e) {
     showError(`Real-time session failed: ${e.message}`);
   }
 }
 
-// Update real-time transcript display
-function updateRealtimeTranscript(transcripts) {
+// Update real-time transcript display with final segments
+function updateRealtimeTranscript(segments) {
   const container = document.getElementById('realtimeTranscript');
-  if (transcripts && transcripts.length > 0) {
-    // Show each chunk as a separate block for better visual feedback
-    container.textContent = '';
-    transcripts.forEach((t) => {
-      const div = document.createElement('div');
-      div.style.cssText = 'margin-bottom: 8px; padding: 4px 0; border-bottom: 1px solid #eee;';
-      div.textContent = t;
-      container.appendChild(div);
-    });
-    container.scrollTop = container.scrollHeight;
+  container.textContent = '';
+  segments.forEach((seg) => {
+    const div = document.createElement('div');
+    div.style.cssText = 'margin-bottom: 8px; padding: 4px 0; border-bottom: 1px solid #eee;';
+    div.textContent = seg.text;
+    container.appendChild(div);
+  });
+  container.scrollTop = container.scrollHeight;
+}
+
+// Show interim (non-final) transcript
+function updateRealtimeTranscriptInterim(text) {
+  const container = document.getElementById('realtimeTranscript');
+  let interim = container.querySelector('.interim');
+  if (!interim) {
+    interim = document.createElement('div');
+    interim.className = 'interim';
+    interim.style.cssText = 'color: #999; font-style: italic; padding: 4px 0;';
+    container.appendChild(interim);
   }
+  interim.textContent = text;
+  container.scrollTop = container.scrollHeight;
 }
 
 // Stop real-time session
 async function stopRealtimeSession() {
-  clearInterval(realtimeChunkInterval);
-  realtimeChunkInterval = null;
+  // Stop sending audio
+  if (realtimeProcessor) {
+    realtimeProcessor.disconnect();
+    realtimeProcessor = null;
+  }
+  if (realtimeAudioContext) {
+    realtimeAudioContext.close();
+    realtimeAudioContext = null;
+  }
 
-  if (realtimeSessionId) {
-    try {
-      const response = await authenticatedFetch(`${SERVER_URL}/transcribe/realtime/stop/${realtimeSessionId}`, {
-        method: 'POST'
-      });
+  // Signal end of audio to Deepgram
+  if (realtimeSocket?.readyState === WebSocket.OPEN) {
+    realtimeSocket.send(new ArrayBuffer(0));
+    // Wait briefly for final results
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    realtimeSocket.close();
+  }
+  realtimeSocket = null;
 
-      const result = await response.json();
+  // Assemble final result from accumulated segments
+  if (realtimeSegments.length > 0) {
+    const fullText = realtimeSegments.map(s => s.text).join(' ');
+    currentResult = {
+      full_text: fullText,
+      segments: realtimeSegments.map(s => ({
+        timestamp: formatTime(Math.floor(s.start)),
+        text: s.text
+      }))
+    };
 
-      // Show final result
-      if (result.full_transcript) {
-        currentResult = {
-          full_text: result.full_transcript,
-          segments: result.segments.map((text, i) => ({
-            timestamp: formatTime(i * 5),
-            text: text
-          }))
-        };
-        showResult(currentResult);
-      }
-    } catch (e) {
-      console.error('Stop session error:', e);
-    }
+    currentMetadata = {
+      source: 'Tab Recording (Real-time)',
+      source_type: 'recording',
+      extraction_method: 'cloud',
+      duration_seconds: recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null,
+      processed_at: new Date().toISOString()
+    };
 
-    realtimeSessionId = null;
+    await chrome.storage.local.set({
+      transcriptResult: currentResult,
+      transcriptMetadata: currentMetadata
+    });
+
+    showResult(currentResult);
+    incrementUsage();
+    trySyncOrQueue(currentResult, currentMetadata);
   }
 
   document.getElementById('realtimeTranscript').style.display = 'none';
+  realtimeSegments = [];
 }
 
 // Format seconds to MM:SS
@@ -883,12 +643,20 @@ function formatTime(seconds) {
 
 // Stop recording
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+  if (isRealtimeMode) {
+    // Stop MediaRecorder first
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    // Then stop the realtime WebSocket session
+    stopRealtimeSession();
+  } else {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
   }
 
   clearInterval(recordingTimer);
-  clearInterval(realtimeChunkInterval);
 
   document.getElementById('startRecordBtn').style.display = 'block';
   document.getElementById('stopRecordBtn').style.display = 'none';
@@ -897,11 +665,13 @@ function stopRecording() {
   isRealtimeMode = false;
 }
 
-// Transcribe recording
+// Transcribe recording via cloud (Deepgram Nova-2)
 async function transcribeRecording(blob) {
-  const connected = await checkServerConnection();
-  if (!connected) {
-    showError('Server not running. Please start the local server first.');
+  if (!await checkUsageLimit()) return;
+
+  const authenticated = await isCloudAuthenticated();
+  if (!authenticated) {
+    showError('Please sign in to use cloud transcription. Go to Settings to sign in.');
     return;
   }
 
@@ -910,149 +680,37 @@ async function transcribeRecording(blob) {
 
   const recordingDuration = recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null;
 
-  // Smart model selection based on recording duration
-  // Short recordings get better quality, long recordings need to be fast
-  let model = 'base';
-  if (recordingDuration && recordingDuration > 1800) {
-    model = 'tiny'; // > 30 min: use tiny for speed
-  }
-
-  // Initialize metadata for this transcription
   currentMetadata = {
     source: 'Tab Recording',
     source_type: 'recording',
-    model: model,
-    duration: recordingDuration,
+    extraction_method: 'cloud',
+    duration_seconds: recordingDuration,
     processed_at: new Date().toISOString()
   };
 
-  const formData = new FormData();
-  formData.append('file', blob, 'recording.webm');
-  formData.append('model', model);
-
-  const hfToken = await getHfToken();
-  if (hfToken) {
-    formData.append('hf_token', hfToken);
-  }
-
   try {
-    const response = await authenticatedFetch(`${SERVER_URL}/transcribe/file`, {
-      method: 'POST',
-      body: formData
+    const file = new File([blob], 'recording.webm', { type: 'audio/webm' });
+    const result = await transcriptionService.transcribeFile(file, (progress) => {
+      updateProgress(progress);
     });
 
-    const data = await response.json();
-    if (data.job_id) {
-      currentJobId = data.job_id;
-      // Hand off to background for persistent polling
-      chrome.runtime.sendMessage({
-        action: 'trackJob',
-        jobId: data.job_id,
-        metadata: currentMetadata
-      });
-      startProgressPolling();
-    } else {
-      showError('Failed to start transcription');
-      hideProgress();
-    }
-  } catch (e) {
-    showError(`Error: ${e.message}`);
     hideProgress();
-  }
-}
+    currentResult = result;
 
-// Check if there's an active job from background (e.g., from before panel closed)
-async function checkActiveJob() {
-  try {
-    // First check background worker for in-progress jobs
-    const response = await chrome.runtime.sendMessage({ action: 'getJobStatus' });
-    if (response.job) {
-      const job = response.job;
-      currentJobId = job.id;
-      currentMetadata = job.metadata;
+    if (result.language) currentMetadata.language = result.language;
 
-      if (job.status === 'completed') {
-        // Job finished while panel was closed
-        currentResult = job.result;
-        showResult(job.result);
-        return;
-      } else if (job.status === 'error') {
-        showError(job.error);
-        return;
-      } else if (job.status === 'processing') {
-        // Job still in progress, resume showing progress
-        showProgress(job.progress, job.stage);
-        startProgressPolling();
-        return;
-      }
-    }
+    await chrome.storage.local.set({
+      transcriptResult: currentResult,
+      transcriptMetadata: currentMetadata
+    });
+
+    showResult(currentResult);
+    incrementUsage();
+    trySyncOrQueue(currentResult, currentMetadata);
   } catch (e) {
-    // Background not ready yet, continue to check storage
+    hideProgress();
+    showError(`Transcription failed: ${e.message}`);
   }
-
-  // Check storage for completed transcripts that weren't displayed
-  // (handles case where Chrome restarted the service worker during long transcriptions)
-  try {
-    const stored = await chrome.storage.local.get(['transcriptResult', 'transcriptMetadata']);
-    if (stored.transcriptResult) {
-      currentResult = stored.transcriptResult;
-      currentMetadata = stored.transcriptMetadata || {};
-      showResult(stored.transcriptResult);
-    }
-  } catch (e) {
-    console.log('Error checking storage for transcript:', e);
-  }
-}
-
-// Start polling background for job status (UI updates only)
-function startProgressPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-  }
-
-  pollInterval = setInterval(async () => {
-    try {
-      const response = await chrome.runtime.sendMessage({ action: 'getJobStatus' });
-      if (!response.job) {
-        clearInterval(pollInterval);
-        return;
-      }
-
-      const job = response.job;
-
-      if (job.status === 'completed') {
-        clearInterval(pollInterval);
-        hideProgress();
-        currentResult = job.result;
-        currentMetadata = job.metadata;
-        showResult(job.result);
-        incrementUsage(); // Count successful transcription
-        trySyncOrQueue(job.result, job.metadata); // Cloud sync (silent, non-blocking)
-      } else if (job.status === 'error') {
-        clearInterval(pollInterval);
-        hideProgress();
-        showError(job.error);
-      } else {
-        // Update progress UI
-        const stage = job.stage || 'processing';
-        const progress = job.progress || 'Processing...';
-        const downloadPercent = job.downloadPercent;
-
-        // Update progress bar for download stage
-        if (stage === 'downloading' && downloadPercent !== undefined) {
-          progressBar.classList.remove('indeterminate');
-          progressBar.style.width = `${downloadPercent}%`;
-        } else {
-          progressBar.classList.add('indeterminate');
-          progressBar.style.width = '';
-        }
-
-        updateProgress(progress, stage);
-      }
-    } catch (e) {
-      // Background not responding, will retry
-    }
-  }, POLLING_INTERVAL_MS);
 }
 
 // UI helpers
@@ -1078,11 +736,9 @@ function updateProgress(text, stage = '') {
   const stageIndicator = document.getElementById('stageIndicator');
   if (stageIndicator && stage) {
     const stageLabels = {
-      'queued': '⏳ Queued',
-      'downloading': '⬇️ Downloading',
-      'converting': '🔄 Converting',
+      'uploading': '⬆️ Uploading',
       'transcribing': '🎤 Transcribing',
-      'diarizing': '👥 Identifying Speakers',
+      'processing': '⏳ Processing',
       'complete': '✅ Complete'
     };
     stageIndicator.textContent = stageLabels[stage] || stage;
@@ -1109,13 +765,9 @@ async function showResult(result) {
       : currentMetadata.source;
   }
 
-  // Add diarization status to completion message
+  // Add speaker info to completion message
   let statusSuffix = '';
-  if (result.diarization_status === 'failed') {
-    statusSuffix = ' (speaker detection failed)';
-  } else if (result.diarization_status === 'skipped') {
-    statusSuffix = ' (no HF token)';
-  } else if (result.diarization_status === 'success' && result.speakers?.length > 0) {
+  if (result.speakers?.length > 0) {
     statusSuffix = ` (${result.speakers.length} speaker${result.speakers.length > 1 ? 's' : ''})`;
   }
 
@@ -1151,14 +803,9 @@ async function autoPopulateUrl() {
     // Always populate the URL field with the current tab
     document.getElementById('urlInput').value = tab.url;
 
-    // Also fetch and show the title
-    try {
-      const preflight = await preflightCheck(tab.url);
-      if (preflight && preflight.title && !preflight.error) {
-        showVideoTitle(preflight.title);
-      }
-    } catch (e) {
-      // Silently fail title fetch
+    // Use tab title for preview (no server preflight needed)
+    if (tab.title) {
+      showVideoTitle(tab.title);
     }
   } catch (e) {
     // Silently fail if we can't get the tab URL
@@ -1187,12 +834,13 @@ function setupUrlTitlePreview() {
       return; // Invalid URL, don't fetch
     }
 
-    // Debounce: wait after user stops typing
-    debounceTimer = setTimeout(async () => {
-      const preflight = await preflightCheck(url);
-      if (preflight && preflight.title && !preflight.error) {
-        showVideoTitle(preflight.title);
-      } else {
+    // Debounce: just show a placeholder since we can't preflight without server
+    debounceTimer = setTimeout(() => {
+      // Show the URL domain as title preview
+      try {
+        const urlObj = new URL(url);
+        showVideoTitle(urlObj.hostname);
+      } catch {
         hideVideoTitle();
       }
     }, DEBOUNCE_DELAY_MS);

@@ -49,17 +49,17 @@ update.sh            Pull + restart
 ### Extension Script Loading Order
 HTML pages load scripts in this dependency chain:
 ```
-supabase.min.js → config.js → auth.js → supabase.js → cloud-auth.js → cloud-sync.js → ExtPay.js → [page].js
+supabase.min.js → config.js → supabase.js → cloud-auth.js → cloud-sync.js → transcription-service.js → ExtPay.js → [page].js
 ```
 Functions reference globals from earlier scripts but are only called at runtime, not parse time.
 
 ### State Lives in Storage, Not Memory
-Service workers are ephemeral. All important state goes in `chrome.storage.local`. In-memory variables (like `activeJob` in background.js) are convenience caches — storage is the source of truth.
+Service workers are ephemeral. All important state goes in `chrome.storage.local`.
 
 ### Auth Pattern
-- Server auth: `authenticatedFetch()` in `auth.js` handles token auto-fetch and 401 retry
 - Cloud auth: `canUseCloudFeatures()` requires both `isPremiumUser()` AND `isCloudAuthenticated()`
 - Never check just one — both gates must pass
+- Edge Functions validate JWT via `supabase.auth.getUser(token)`
 
 ### Version Source of Truth
 `extension/manifest.json` is the single source. `config.js` reads it via `chrome.runtime.getManifest().version`. HTML pages display it via `.version-tag` elements. No hardcoded version strings elsewhere.
@@ -68,18 +68,6 @@ Service workers are ephemeral. All important state goes in `chrome.storage.local
 All user content rendered via `innerHTML` must be escaped. Use `escapeHtmlForShare()` or DOMPurify (`lib/purify.min.js`). This includes "safe" data like email addresses.
 
 ## Gotchas
-
-### Service Workers Don't Send Origin Headers
-Manifest V3 `fetch()` from service workers omits the `Origin` header. Any server endpoint that validates Origin must accept empty Origin, or the extension silently gets 401s.
-
-### Subprocess Isolation for Whisper
-`worker.py` runs as a subprocess, not a thread. This prevents tqdm broken pipes, ensures clean memory release, and avoids PyTorch/CUDA thread conflicts. Don't refactor this into async — the isolation is intentional.
-
-### venv Paths
-Never hardcode venv paths. Use `sys.executable` in Python code. Let `start-server.sh` handle venv activation.
-
-### Timeouts
-FFmpeg conversion: 1 hour timeout (long videos). Whisper inference: no timeout. Don't reduce these.
 
 ### Event Listeners
 Setup functions called multiple times (e.g., `setupShareButton()`) will stack event listeners. Use guard flags (`_shareListenersAttached`) to prevent double-binding.
@@ -93,10 +81,11 @@ Setup functions called multiple times (e.g., `setupShareButton()`) will stack ev
 |------|------|------|
 | `extension/background.js` | Service worker | Ephemeral — save state to storage immediately |
 | `extension/sidepanel.js` | Main UI | Check storage on load for recovered results |
-| `extension/config.js` | Shared constants | Version, URLs, polling intervals |
-| `extension/auth.js` | Server auth | Auto-token fetch + 401 retry |
+| `extension/config.js` | Shared constants | Version, URLs, cloud endpoints |
 | `extension/cloud-auth.js` | Supabase auth | OAuth, session management |
 | `extension/cloud-sync.js` | Cloud operations | Sync, sharing, API keys, offline queue |
+| `extension/transcription-service.js` | Cloud transcription | Deepgram + Supadata via Edge Functions |
 | `extension/transcript.js` | Transcript page | Viewer, editor, export, share modal |
-| `server/server.py` | FastAPI server | Use `sys.executable`, not hardcoded paths |
-| `server/worker.py` | Transcription worker | Subprocess isolation — don't thread this |
+| `supabase/functions/transcribe/` | Edge Function | File → Deepgram Nova-2 |
+| `supabase/functions/transcribe-url/` | Edge Function | URL → Supadata |
+| `supabase/functions/realtime-token/` | Edge Function | Temp Deepgram key for streaming |

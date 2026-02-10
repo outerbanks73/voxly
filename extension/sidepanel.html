@@ -726,7 +726,7 @@
 
   <div id="statusBar" class="status-bar disconnected">
     <div class="status-dot"></div>
-    <span id="statusText">Checking server connection...</span>
+    <span id="statusText">Checking cloud status...</span>
   </div>
 
   <!-- Usage Indicator (free tier) -->
@@ -762,7 +762,7 @@
   <!-- URL Tab -->
   <div id="tab-url" class="tab-content active">
     <p class="url-description">
-      Paste any video or audio URL. We'll automatically transcribe and summarize for you the content.
+      Paste any video or audio URL. Supports YouTube, TikTok, Instagram, X, Facebook, and any public URL.
     </p>
 
     <!-- Video title preview -->
@@ -807,52 +807,6 @@
     </div>
   </div>
 
-  <!-- Pre-flight Confirmation Dialog -->
-  <div id="preflightDialog" class="dialog-overlay" style="display: none;">
-    <div class="dialog">
-      <h3 id="preflightTitle">Video Info</h3>
-      <div class="preflight-info">
-        <div class="preflight-row">
-          <span class="label">Duration:</span>
-          <span id="preflightDuration" class="value"></span>
-        </div>
-        <div class="preflight-row" id="whisperEstimateRow">
-          <span class="label">Whisper estimate:</span>
-          <span id="preflightEstimate" class="value"></span>
-        </div>
-      </div>
-
-      <!-- YouTube Transcript Option -->
-      <div id="youtubeTranscriptOption" class="youtube-transcript-option" style="display: none;">
-        <div class="transcript-badge">
-          <span class="badge-icon">⚡</span>
-          <span class="badge-text">YouTube transcript available!</span>
-        </div>
-        <div class="transcript-details">
-          <span id="transcriptType" class="transcript-type"></span>
-          <span id="transcriptLanguage" class="transcript-lang"></span>
-        </div>
-
-        <!-- Language selector (shown if multiple languages) -->
-        <div id="languageSelector" class="language-selector" style="display: none;">
-          <label>Language:</label>
-          <select id="transcriptLanguageSelect"></select>
-        </div>
-      </div>
-
-      <div class="dialog-buttons">
-        <button class="btn btn-secondary" id="preflightCancel">Cancel</button>
-        <!-- Extract button for YouTube transcripts -->
-        <button class="btn btn-success" id="preflightExtract" style="display: none;">
-          ⚡ Extract Instant
-        </button>
-        <button class="btn btn-primary" id="preflightConfirm">
-          🎤 Transcribe
-        </button>
-      </div>
-    </div>
-  </div>
-
   <!-- Progress Section -->
   <div id="progressSection" class="progress-section">
     <div class="stage-indicator" id="stageIndicator">⏳ Starting</div>
@@ -883,7 +837,7 @@
   </a>
 
   <a href="options.html" target="_blank" class="settings-link">
-    ⚙️ Settings (Hugging Face token for speaker identification)
+    ⚙️ Settings
   </a>
 
   <!-- Upgrade Modal -->
@@ -906,7 +860,8 @@
       </div>
 
       <ul class="upgrade-features">
-        <li>Unlimited transcriptions</li>
+        <li>Unlimited cloud transcriptions</li>
+        <li>Deepgram Nova-2 accuracy</li>
         <li>AI-powered summaries</li>
         <li>Priority support</li>
       </ul>
@@ -918,10 +873,10 @@
 
   <script src="lib/supabase.min.js"></script>
   <script src="config.js"></script>
-  <script src="auth.js"></script>
   <script src="supabase.js"></script>
   <script src="cloud-auth.js"></script>
   <script src="cloud-sync.js"></script>
+  <script src="transcription-service.js"></script>
   <script src="ExtPay.js"></script>
   <script src="sidepanel.js"></script>
 </body>

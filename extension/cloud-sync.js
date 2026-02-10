@@ -21,7 +21,7 @@ async function syncTranscriptToCloud(result, metadata) {
     language: metadata.language || 'en',
     model: metadata.model || null,
     word_count: result.full_text ? result.full_text.split(/\s+/).length : 0,
-    extraction_method: metadata.extraction_method || 'whisper',
+    extraction_method: metadata.extraction_method || 'cloud',
     full_text: result.full_text,
     segments: result.segments || [],
     speakers: result.speakers || [],

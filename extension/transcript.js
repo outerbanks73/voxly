@@ -1,5 +1,5 @@
 // Transcript Management Page JavaScript
-// CURRENT_VERSION, SERVER_URL, and other constants are defined in config.js
+// CURRENT_VERSION and other constants are defined in config.js
 
 // Sanitize HTML from AI summaries to prevent XSS
 function sanitizeHTML(html) {

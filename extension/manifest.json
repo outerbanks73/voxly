@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Voxly - Instant Transcripts",
   "short_name": "Voxly",
-  "version": "2.0.0",
-  "description": "Transform audio & video into AI-ready transcripts. Instant YouTube extraction or local Whisper transcription. Export to JSON, Markdown, SRT.",
+  "version": "2.5.0",
+  "description": "Transform audio & video into AI-ready transcripts. Cloud-powered transcription with Deepgram Nova-2. Export to JSON, Markdown, SRT.",
   "permissions": [
     "storage",
     "tabs",
@@ -15,8 +15,8 @@
     "identity"
   ],
   "host_permissions": [
-    "http://localhost:5123/*",
-    "https://ohxuifdseybxckmprcry.supabase.co/*"
+    "https://ohxuifdseybxckmprcry.supabase.co/*",
+    "wss://api.deepgram.com/*"
   ],
   "action": {
     "default_title": "Open Voxly",
