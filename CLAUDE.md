@@ -27,7 +27,8 @@ server/              Python FastAPI server (transcription engine)
 supabase/            Database migrations + Edge Functions
 docs/
   PRD.md             Requirements — what we build and why
-  TDD-v2.0.md        Design — how the shipped v2.0 system works
+  TDD-v2.5.md        Design — current v2.5 cloud transcription system
+  TDD-v2.0.md        Design — original v2.0 local-only system
   TDD-v3.0.md        Design — planned v3.0 Tauri desktop app
 CHANGELOG.md         Post-release change tracking
 start-server.sh      Server lifecycle (start)

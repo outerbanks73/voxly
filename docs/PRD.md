@@ -1,17 +1,17 @@
 # Voxly - Product Requirements Document
 
-**Version:** 2.0.0
+**Version:** 2.5.0
 **Last Updated:** February 2026
 
 ---
 
 ## 1. Overview
 
-Voxly is a cloud-enabled audio transcription platform that transforms audio and video content into structured, AI-ready formats. It consists of a Chrome extension frontend, a local Python transcription server, and a Supabase cloud backend for storage, sharing, and API access.
+Voxly is a cloud-enabled audio transcription platform that transforms audio and video content into structured, AI-ready formats. It consists of a Chrome extension frontend with built-in cloud transcription, an optional local Python transcription server ("Voxly Desktop") for privacy-focused users, and a Supabase cloud backend for storage, sharing, and API access.
 
-**Key Value Proposition:** Convert spoken content into formats optimized for LLM consumption, RAG pipelines, knowledge bases, and data workflows — with optional cloud sync, sharing, and developer API.
+**Key Value Proposition:** Convert spoken content into formats optimized for LLM consumption, RAG pipelines, knowledge bases, and data workflows — no local setup required. Optional cloud sync, sharing, and developer API.
 
-**Design:** See [TDD-v2.0.md](TDD-v2.0.md) for architecture and design decisions.
+**Design:** See [TDD-v2.5.md](TDD-v2.5.md) for current architecture. See [TDD-v2.0.md](TDD-v2.0.md) for the original local-only design.
 
 ---
 
@@ -23,18 +23,29 @@ Voxly is a cloud-enabled audio transcription platform that transforms audio and 
 |--------|-------------|
 | **File Upload** | User selects local audio/video file |
 | **URL** | User provides URL to audio/video (YouTube, podcasts, etc.) |
-| **Tab Recording** | Captures audio from active browser tab |
+| **Tab Recording** | Captures audio from active browser tab (Voxly Desktop only for real-time) |
 | **YouTube Transcript** | Extract existing YouTube captions without transcription |
 
-### 2.2 Transcription Options
+### 2.2 Transcription Engines
 
-| Option | Values | Default |
-|--------|--------|---------|
-| **Model** | tiny, base, small, medium, large | base |
-| **Speaker Diarization** | Enabled/Disabled | Disabled |
-| **HF Token** | User-provided (required for diarization) | None |
+| Engine | Description |
+|--------|-------------|
+| **Cloud (Deepgram Nova-2)** | Default. No local setup required. Managed by Voxly. |
+| **Custom API** | User-configured endpoint (self-hosted Whisper, AssemblyAI, etc.) |
+| **Voxly Desktop (Local)** | Local Python server with faster-whisper. Full offline capability. |
 
-### 2.3 Export Formats
+### 2.3 Transcription Options
+
+| Option | Values | Default | Availability |
+|--------|--------|---------|-------------|
+| **Transcription Mode** | Cloud, Custom API, Voxly Desktop | Cloud | All users |
+| **Model** | tiny, base, small, medium, large | base | Voxly Desktop only |
+| **Speaker Diarization** | Enabled/Disabled | Disabled | Voxly Desktop only |
+| **HF Token** | User-provided (required for diarization) | None | Voxly Desktop only |
+| **Custom API Endpoint** | User-provided URL | None | Custom API mode only |
+| **Custom API Key** | User-provided key | None | Custom API mode only |
+
+### 2.4 Export Formats
 
 | Format | Use Case |
 |--------|----------|
@@ -44,7 +55,17 @@ Voxly is a cloud-enabled audio transcription platform that transforms audio and 
 | **VTT** | Web video, HTML5 players |
 | **TXT** | Universal plain text |
 
-### 2.4 Cloud Features (Premium)
+### 2.5 Usage Limits
+
+| Limit | Free | Premium |
+|-------|------|---------|
+| Cloud transcriptions/month | 15 | Unlimited |
+| Max file size (cloud) | 100 MB | 500 MB |
+| Max duration (cloud) | 60 min | 240 min |
+| YouTube transcript extraction | Unlimited | Unlimited |
+| Voxly Desktop transcriptions | Unlimited | Unlimited |
+
+### 2.6 Cloud Features (Premium)
 
 | Feature | Description |
 |---------|-------------|
@@ -55,7 +76,7 @@ Voxly is a cloud-enabled audio transcription platform that transforms audio and 
 | **Developer API** | REST API with API key authentication for CRUD operations |
 | **Offline Queue** | Failed syncs queued and retried automatically |
 
-### 2.5 Metadata Enrichment
+### 2.7 Metadata Enrichment
 
 Every export includes:
 - **Source**: URL, filename, or "Tab Recording"
@@ -63,19 +84,20 @@ Every export includes:
 - **Word Count**: Total words in transcript
 - **Speakers**: List of identified speakers (if diarization enabled)
 - **Language**: Detected language
-- **Model**: Whisper model used
+- **Model**: Transcription model used (e.g., nova-2, large-v3)
 - **Processed At**: ISO timestamp
 
 ---
 
 ## 3. Non-Functional Requirements
 
-### 3.1 Privacy & Local Processing
-- All transcription happens on user's machine
-- No data transmission to external servers (except URL fetching via yt-dlp)
+### 3.1 Privacy & Processing
+- Cloud transcription sends audio to Deepgram (third-party) for processing
+- Voxly Desktop mode: all transcription happens on user's machine (no external transmission)
+- Custom API mode: audio sent only to user's own configured endpoint
 - Cloud sync is opt-in and requires premium + explicit login
 - No analytics or telemetry
-- No account required for core functionality
+- No account required for Voxly Desktop mode; Supabase account required for cloud transcription
 
 ### 3.2 Performance
 - Tiny model: ~10x realtime on CPU
@@ -123,7 +145,17 @@ Query parameters for list: `page`, `page_size` (max 100), `search` (full-text).
 
 ## 5. Version History
 
-### 2.0.0 (Current)
+### 2.5.0 (Current)
+- Cloud transcription — Deepgram Nova-2 as default engine, no local setup required
+- Custom API support — Users can configure their own transcription endpoint
+- Voxly Desktop — Local Python server preserved as opt-in mode for privacy/offline use
+- Usage quotas — Free tier (15 cloud transcriptions/month), unlimited for premium
+- YouTube transcript extraction via cloud — No local server needed for caption extraction
+- URL transcription via cloud — Download and transcribe URLs without local yt-dlp
+- Mode selection — Cloud, Custom API, or Voxly Desktop in Settings
+- Chrome Web Store ready — Core functionality works without any local installation
+
+### 2.0.0
 - OAuth accounts — Google, GitHub, email/password, magic links via Supabase Auth
 - Cloud transcript storage — Supabase Postgres with auto-sync
 - Transcript library — Full-text search, pagination, shared transcripts tab
@@ -168,14 +200,11 @@ Query parameters for list: `page`, `page_size` (max 100), `search` (full-text).
 | ffmpeg | Audio conversion | System |
 | torch | ML backend | 2.0+ |
 | supabase-js | Cloud client (extension) | 2.x |
+| Deepgram Nova-2 | Cloud speech recognition (API) | v1 |
 
 ---
 
 ## 7. Roadmap
-
-### 2.5.0 - Custom Models
-- Fine-tuned Whisper for domain-specific vocabulary
-- Custom speaker voice profiles
 
 ### 3.0.0 - Desktop App
 - Standalone desktop application (Tauri) — see [TDD-v3.0.md](TDD-v3.0.md)
