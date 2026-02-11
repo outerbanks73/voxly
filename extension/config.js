@@ -25,7 +25,7 @@ const GITHUB_REPO = 'outerbanks73/speaktotext-local';
 
 // Supabase (cloud features — premium, opt-in)
 const SUPABASE_URL = 'https://ohxuifdseybxckmprcry.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_8LuIdBPmXssVwNnM_rhOMQ__U7ExMGA';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9oeHVpZmRzZXlieGNrbXByY3J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA2NDE5NDgsImV4cCI6MjA4NjIxNzk0OH0._4NFs2SY98gIL6Z0tgiTxIVSX7FBJ8b_46oF7Vi7p6M';
 const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 // Deepgram (realtime streaming)

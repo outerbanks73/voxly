@@ -499,64 +499,59 @@
         </div>
       </div>
 
-      <!-- API Keys (Developer Access) -->
-      <div class="section" id="apiKeysSection" style="display: none;">
-        <h2>API Keys</h2>
+      <!-- Advanced Settings -->
+      <div class="section">
+        <h2>Advanced Settings</h2>
         <p style="font-size: 14px; margin-bottom: 16px; color: #6b6b6b;">
-          Create API keys to access your transcripts programmatically. Use them to download transcripts or submit new ones via the REST API.
+          These settings are optional. Transcription works without any configuration below.
         </p>
 
-        <div class="form-group">
-          <label>Create New API Key</label>
-          <div class="input-group">
-            <input type="text" id="apiKeyNameInput" placeholder="Key name (e.g., My Script)">
-            <button class="btn btn-primary" id="createApiKeyBtn">Create Key</button>
+        <!-- Voxly API Keys (Developer Access) -->
+        <div id="apiKeysSection" style="display: none; margin-bottom: 24px;">
+          <h3 style="margin-bottom: 8px;">Voxly API Keys</h3>
+          <p style="font-size: 13px; margin-bottom: 12px; color: #6b6b6b;">
+            Query your transcripts programmatically via the REST API.
+          </p>
+
+          <div class="form-group">
+            <div class="input-group">
+              <input type="text" id="apiKeyNameInput" placeholder="Key name (e.g., My Script)">
+              <button class="btn btn-primary" id="createApiKeyBtn">Create Key</button>
+            </div>
           </div>
-        </div>
 
-        <!-- Newly created key display (shown once) -->
-        <div id="newKeyDisplay" class="info-box" style="display: none; margin-bottom: 16px; background: #d4edda; border-color: #28a745;">
-          <h3 style="color: #155724;">New API Key Created</h3>
-          <p style="color: #155724;">Copy this key now. You won't be able to see it again.</p>
-          <div class="input-group" style="margin-top: 8px;">
-            <input type="text" id="newKeyValue" readonly style="font-family: monospace; font-size: 13px;">
-            <button class="btn btn-secondary" id="copyNewKeyBtn">Copy</button>
+          <div id="newKeyDisplay" class="info-box" style="display: none; margin-bottom: 16px; background: #d4edda; border-color: #28a745;">
+            <h3 style="color: #155724;">New API Key Created</h3>
+            <p style="color: #155724;">Copy this key now. You won't be able to see it again.</p>
+            <div class="input-group" style="margin-top: 8px;">
+              <input type="text" id="newKeyValue" readonly style="font-family: monospace; font-size: 13px;">
+              <button class="btn btn-secondary" id="copyNewKeyBtn">Copy</button>
+            </div>
           </div>
+
+          <div id="apiKeysList" style="margin-top: 12px;"></div>
+          <div class="status-message" id="apiKeyStatus"></div>
         </div>
 
-        <!-- Existing keys list -->
-        <div id="apiKeysList" style="margin-top: 12px;"></div>
+        <!-- OpenAI API Key (for AI Summaries) -->
+        <div style="margin-bottom: 8px;">
+          <h3 style="margin-bottom: 8px;">AI Summaries</h3>
+          <p style="font-size: 13px; margin-bottom: 12px; color: #6b6b6b;">
+            Add your own OpenAI key to generate AI summaries of transcripts. Requires Voxly Pro. Uses GPT-4o-mini (~$0.001/transcript).
+            Get a key at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a>.
+          </p>
 
-        <div class="status-message" id="apiKeyStatus"></div>
-      </div>
-
-
-      <!-- OpenAI API Key (for AI Summaries) -->
-      <div class="section">
-        <h2>AI Summaries (Premium)</h2>
-        <div class="info-box">
-          <h3>✨ Setup Guide</h3>
-          <p>AI-powered summaries require a Voxly Pro subscription and your own OpenAI API key:</p>
-          <ol>
-            <li><strong>Subscribe:</strong> Upgrade to Voxly Pro in the extension</li>
-            <li><strong>Get API Key:</strong> Create an account at <a href="https://platform.openai.com" target="_blank">platform.openai.com</a></li>
-            <li><strong>Generate Key:</strong> Go to <a href="https://platform.openai.com/api-keys" target="_blank">API Keys</a> → "Create new secret key"</li>
-            <li><strong>Paste Below:</strong> Enter your key starting with <code>sk-</code></li>
-          </ol>
-          <p style="margin-top: 12px; color: #065f46;"><strong>💡 Cost:</strong> Summaries use GPT-4o-mini (~$0.001 per transcript)</p>
-        </div>
-
-        <div class="form-group" style="margin-top: 16px;">
-          <label>OpenAI API Key</label>
-          <div class="input-group">
-            <input type="password" id="openaiKeyInput" placeholder="sk-xxxxxxxxxxxxxxxxx">
-            <button class="toggle-visibility" id="toggleOpenaiKey">👁️</button>
+          <div class="form-group">
+            <div class="input-group">
+              <input type="password" id="openaiKeyInput" placeholder="sk-xxxxxxxxxxxxxxxxx">
+              <button class="toggle-visibility" id="toggleOpenaiKey">👁️</button>
+            </div>
+            <p class="help-text">Stored locally. Only sent to OpenAI for summarization.</p>
           </div>
-          <p class="help-text">Your API key is stored locally and only sent to OpenAI for summarization.</p>
-        </div>
 
-        <button class="btn btn-primary" id="saveOpenaiKeyBtn">Save API Key</button>
-        <div class="status-message" id="openaiKeyStatus"></div>
+          <button class="btn btn-primary" id="saveOpenaiKeyBtn">Save API Key</button>
+          <div class="status-message" id="openaiKeyStatus"></div>
+        </div>
       </div>
 
       <!-- About -->
