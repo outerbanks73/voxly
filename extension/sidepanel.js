@@ -84,6 +84,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   await updateUsageIndicator();
   checkForUpdates();
   updateLibraryLink(); // Show library link if cloud user
+
+  // Listen for auth state changes broadcast from options page or background
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.action === 'cloudAuthStateChanged') {
+      checkCloudStatusAndUpdateUI();
+      updateLibraryLink();
+      updateUsageIndicator();
+    }
+  });
+
+  // Retry auth check — Supabase async storage adapter may not be ready yet
+  setTimeout(async () => {
+    const currentStatus = statusText.textContent;
+    if (currentStatus === 'Sign in required') {
+      await checkCloudStatusAndUpdateUI();
+      updateLibraryLink();
+    }
+  }, 1500);
 });
 
 // Check if user is premium subscriber
