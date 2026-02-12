@@ -50,12 +50,26 @@ const transcriptionService = {
     const user = await getCloudUser();
     if (!user) throw new Error('Not authenticated');
 
-    const ext = file.name.split('.').pop() || 'webm';
+    const ext = (file.name.split('.').pop() || 'webm').toLowerCase();
     const path = `${user.id}/${Date.now()}.${ext}`;
+
+    // Resolve MIME type from extension if browser reports generic octet-stream
+    let contentType = file.type;
+    if (!contentType || contentType === 'application/octet-stream') {
+      const mimeMap = {
+        mp3: 'audio/mpeg', mp4: 'video/mp4', m4a: 'audio/mp4',
+        wav: 'audio/wav', webm: 'audio/webm', ogg: 'audio/ogg',
+        flac: 'audio/flac', aac: 'audio/aac', wma: 'audio/x-ms-wma',
+        avi: 'video/x-msvideo', mkv: 'video/x-matroska', mov: 'video/quicktime',
+        mpg: 'video/mpeg', mpeg: 'video/mpeg', ts: 'video/mp2t',
+        '3gp': 'video/3gpp', opus: 'audio/opus'
+      };
+      contentType = mimeMap[ext] || 'audio/mpeg';
+    }
 
     const { error } = await sb.storage
       .from('audio-files')
-      .upload(path, file, { contentType: file.type });
+      .upload(path, file, { contentType });
 
     if (error) throw new Error(`Upload failed: ${error.message}`);
     return path;

@@ -315,6 +315,13 @@ function setupButtons() {
       showError('Please enter a URL');
       return;
     }
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch {
+      showError('Please enter a valid URL');
+      return;
+    }
     await transcribeUrl(url);
   });
 
@@ -430,7 +437,12 @@ async function transcribeUrl(url) {
   } catch (e) {
     hideProgress();
     hideResult();
-    showError(`Transcription failed: ${e.message}`);
+    // Parse Supadata "invalid-request" errors into friendly messages
+    if (e.message.includes('invalid-request') || e.message.includes('could not be detected')) {
+      showError('This URL cannot be transcribed. Supported: YouTube, TikTok, Instagram, X, Facebook, and other streaming platforms. For other files, download them and use the Upload tab.');
+    } else {
+      showError(`Transcription failed: ${e.message}`);
+    }
   }
 }
 
@@ -442,6 +454,12 @@ async function startRecording() {
   try {
     // Get current tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    // Block recording on Chrome internal pages
+    if (!tab?.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('edge://')) {
+      showError('Cannot record this page. Navigate to a website with audio and try again.');
+      return;
+    }
 
     // Request tab capture
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
@@ -500,7 +518,11 @@ async function startRecording() {
     }, 1000);
 
   } catch (e) {
-    showError(`Recording failed: ${e.message}`);
+    if (e.message.includes('activeTab') || e.message.includes('not been invoked')) {
+      showError('Cannot record this page. Navigate to a website with audio and try again.');
+    } else {
+      showError(`Recording failed: ${e.message}`);
+    }
   }
 }
 
