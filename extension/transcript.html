@@ -184,15 +184,6 @@
     }
 
     /* Format Toggle */
-    .format-bar {
-      display: flex;
-      justify-content: flex-start;
-      align-items: center;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-
     .format-toggle {
       display: flex;
       background: #e8f0f8;
@@ -222,11 +213,12 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
-    /* Action Bar */
-    .action-bar {
+    /* Action Bar (inline with format toggle) */
+    .section-actions-bar {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
+      margin: 8px 16px 0;
     }
 
     .btn {
@@ -763,12 +755,6 @@
       border-top: 1px solid #eee;
     }
 
-    /* Ensure summary content scrolls properly */
-    #summaryContent {
-      max-height: 500px;
-      overflow-y: auto;
-    }
-
     .content-section.expanded .section-full-content {
       display: block;
     }
@@ -1049,10 +1035,19 @@
         <button class="edit-meta-btn" id="editMetaBtn">✏️ Edit</button>
       </div>
 
-      <!-- Action Bar -->
-      <div class="format-bar">
-        <div class="action-bar">
-          <button class="btn btn-primary" id="summarizeBtn">✨ Regenerate Summary</button>
+      <!-- Transcript Section -->
+      <div id="transcriptSection" class="content-section expanded">
+        <div class="section-header" id="transcriptHeader">
+          <h3 id="transcriptLabel">📄 Full Transcript</h3>
+          <span class="expand-icon">▼</span>
+        </div>
+        <div class="format-toggle">
+          <button class="format-btn" data-format="segmented">Segmented Timestamps</button>
+          <button class="format-btn active" data-format="paragraph">Full Transcript</button>
+          <button class="format-btn" data-format="prose">No Timestamps</button>
+          <button class="format-btn" data-format="summary">AI Summary</button>
+        </div>
+        <div class="section-actions-bar">
           <div class="export-dropdown">
             <button class="btn btn-secondary" id="exportBtn">💾 Export ▾</button>
             <div class="export-menu" id="exportMenu">
@@ -1066,36 +1061,9 @@
           </div>
           <button class="btn btn-secondary" id="saveCloudBtn" style="display: none;">☁️ Save to Cloud</button>
           <button class="btn btn-secondary" id="shareBtn" style="display: none;">🔗 Share</button>
+          <button class="btn btn-secondary" id="editBtn">✏️ Edit</button>
+          <button class="btn btn-secondary" id="copyBtn">📋 Copy</button>
           <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
-        </div>
-      </div>
-
-      <!-- AI Summary Section (Collapsible) -->
-      <div id="summarySection" class="content-section" style="display: none;">
-        <div class="section-header" id="summaryHeader">
-          <h3>📝 AI Summary</h3>
-          <span class="expand-icon">▼</span>
-        </div>
-        <div class="section-preview" id="summaryPreview">
-          Click to expand and view full AI summary...
-        </div>
-        <div class="section-full-content" id="summaryContent"></div>
-        <div class="section-actions">
-          <button class="btn btn-secondary" id="editSummaryBtn">✏️ Edit</button>
-          <button class="btn btn-secondary" id="copySummaryBtn">📋 Copy</button>
-        </div>
-      </div>
-
-      <!-- Transcript Section (Collapsible) -->
-      <div id="transcriptSection" class="content-section expanded">
-        <div class="section-header" id="transcriptHeader">
-          <h3 id="transcriptLabel">📄 Full Transcript</h3>
-          <span class="expand-icon">▼</span>
-        </div>
-        <div class="format-toggle">
-          <button class="format-btn" data-format="segmented">Segmented Timestamps</button>
-          <button class="format-btn active" data-format="paragraph">Full Transcript</button>
-          <button class="format-btn" data-format="prose">No Timestamps</button>
         </div>
         <div class="section-preview" id="transcriptPreview">
           Click to expand and view full transcript...
@@ -1108,10 +1076,6 @@
               <p>Complete a transcription from the extension to see it here.</p>
             </div>
           </div>
-        </div>
-        <div class="section-actions">
-          <button class="btn btn-secondary" id="editBtn">✏️ Edit</button>
-          <button class="btn btn-secondary" id="copyBtn">📋 Copy</button>
         </div>
       </div>
 

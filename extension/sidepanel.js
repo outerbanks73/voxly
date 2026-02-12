@@ -463,12 +463,13 @@ async function transcribeUrl(url) {
     if (e.message.includes('quota exceeded')) {
       showUpgradeModal();
     } else if (e.message.includes('invalid-request') || e.message.includes('could not be detected') || e.message.includes('Supadata error')) {
-      // Detect Google Drive specifically
-      const urlInput = document.getElementById('urlInput').value.trim();
-      if (urlInput.includes('drive.google.com') || urlInput.includes('docs.google.com')) {
+      const urlValue = document.getElementById('urlInput').value.trim();
+      if (urlValue.includes('drive.google.com') || urlValue.includes('docs.google.com')) {
         showError('Google Drive links cannot be transcribed directly. Download the file first, then use the Upload tab.');
+      } else if (urlValue.includes('meet.google.com')) {
+        showError('Google Meet links cannot be transcribed. To capture a meeting, use the Record tab while the meeting is active.');
       } else {
-        showError('This URL cannot be transcribed. Supported: YouTube, TikTok, Instagram, X, Facebook, and other streaming platforms. For other files, download them and use the Upload tab.');
+        showError('This URL could not be transcribed. Supported: YouTube, TikTok, Instagram, X, Facebook, and other public video/audio URLs. For local files, use the Upload tab.');
       }
     } else {
       showError(`Transcription failed: ${e.message}`);

@@ -46,9 +46,20 @@ const transcriptionService = {
 
   // Upload file to Supabase Storage (audio-files bucket)
   async uploadToStorage(file) {
+    // Ensure session is fresh before upload (prevents stale token errors)
+    const session = await ensureValidSession();
+    if (!session) throw new Error('Session expired. Please sign in again in Settings.');
+
     const sb = getSupabase();
     const user = await getCloudUser();
     if (!user) throw new Error('Not authenticated');
+
+    // Check file size (Supabase Storage limit: 50MB)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      throw new Error(`File too large (${sizeMB} MB). Maximum size is 50 MB. Try compressing the file or using a shorter clip.`);
+    }
 
     const ext = (file.name.split('.').pop() || 'webm').toLowerCase();
     const path = `${user.id}/${Date.now()}.${ext}`;
@@ -67,19 +78,30 @@ const transcriptionService = {
       contentType = mimeMap[ext] || 'audio/mpeg';
     }
 
-    const { error } = await sb.storage
-      .from('audio-files')
-      .upload(path, file, { contentType });
+    console.log(`[Voxly] Uploading file: ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB, type: ${contentType})`);
 
-    if (error) throw new Error(`Upload failed: ${error.message}`);
-    return path;
+    try {
+      const { error } = await sb.storage
+        .from('audio-files')
+        .upload(path, file, { contentType });
+
+      if (error) throw new Error(`Upload failed: ${error.message}`);
+      return path;
+    } catch (e) {
+      if (e.message.includes('Failed to fetch')) {
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+        throw new Error(`Upload failed — could not connect to cloud storage. File: ${sizeMB} MB. Check your internet connection and try again.`);
+      }
+      throw e;
+    }
   },
 
   // Generic Edge Function caller with JWT auth
   async callEdgeFunction(name, body) {
-    const session = await getCloudSession();
+    // Ensure session is fresh (auto-refresh if expired)
+    const session = await ensureValidSession();
     if (!session?.access_token) {
-      throw new Error('Not authenticated. Please sign in.');
+      throw new Error('Session expired. Please sign in again in Settings.');
     }
 
     const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/${name}`, {

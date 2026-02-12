@@ -22,6 +22,45 @@ async function getCloudSession() {
   return session;
 }
 
+// Ensure we have a valid, fresh session before API calls.
+// Returns a valid session or null (if user needs to re-authenticate).
+async function ensureValidSession() {
+  const sb = getSupabase();
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return null;
+
+  // Check if the access token is expired or expiring within 60s
+  try {
+    const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+    const expiresAt = payload.exp * 1000;
+    if (expiresAt - Date.now() > 60000) {
+      // Token still valid
+      return session;
+    }
+  } catch (e) {
+    // JWT decode failed — force refresh
+  }
+
+  // Token expired or expiring — try to refresh
+  console.log('[Voxly] Access token expired, refreshing session...');
+  try {
+    const { data, error } = await sb.auth.refreshSession();
+    if (error || !data.session) {
+      console.error('[Voxly] Session refresh failed:', error?.message || 'no session returned');
+      // Session is unrecoverable — clear it so UI shows "sign in"
+      await cloudSignOut();
+      return null;
+    }
+    console.log('[Voxly] Session refreshed successfully');
+    return data.session;
+  } catch (e) {
+    console.error('[Voxly] Session refresh threw:', e.message);
+    await cloudSignOut();
+    return null;
+  }
+}
+
 // Check if user can use cloud features (premium + logged in)
 async function canUseCloudFeatures() {
   const premium = await isPremiumUser();

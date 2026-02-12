@@ -53,20 +53,7 @@ function toggleSection(sectionId) {
   }
 }
 
-// Update preview text for a section
-function updateSummaryPreview() {
-  const summaryContent = document.getElementById('summaryContent');
-  const summaryPreview = document.getElementById('summaryPreview');
-  if (summaryContent && summaryPreview) {
-    const text = summaryContent.textContent || summaryContent.innerText || '';
-    if (text.trim()) {
-      const preview = text.substring(0, SUMMARY_PREVIEW_LENGTH).trim();
-      summaryPreview.textContent = preview + (text.length > SUMMARY_PREVIEW_LENGTH ? '...' : '');
-    } else {
-      summaryPreview.textContent = 'Click to expand and view AI summary...';
-    }
-  }
-}
+// updateSummaryPreview removed — summary now displays in the transcript container
 
 function updateTranscriptPreview() {
   const transcriptPreview = document.getElementById('transcriptPreview');
@@ -81,10 +68,6 @@ function updateTranscriptPreview() {
 
 // Setup section header click handlers (avoiding inline onclick for CSP compliance)
 function setupSectionHeaders() {
-  const summaryHeader = document.getElementById('summaryHeader');
-  if (summaryHeader) {
-    summaryHeader.addEventListener('click', () => toggleSection('summary'));
-  }
   const transcriptHeader = document.getElementById('transcriptHeader');
   if (transcriptHeader) {
     transcriptHeader.addEventListener('click', () => toggleSection('transcript'));
@@ -164,17 +147,6 @@ async function loadTranscriptData() {
 
         const transcriptSection = document.getElementById('transcriptSection');
         if (transcriptSection) transcriptSection.classList.add('expanded');
-
-        if (currentMetadata.summary) {
-          const summarySection = document.getElementById('summarySection');
-          const summaryContent = document.getElementById('summaryContent');
-          if (summarySection && summaryContent) {
-            summarySection.style.display = 'block';
-            summarySection.classList.add('expanded');
-            summaryContent.innerHTML = sanitizeHTML(currentMetadata.summary);
-            updateSummaryPreview();
-          }
-        }
         return;
       }
     } catch (e) {
@@ -204,20 +176,7 @@ async function loadTranscriptData() {
           transcriptSection.classList.add('expanded');
         }
 
-        // Display saved summary if available, or auto-generate if not
-        if (currentMetadata.summary) {
-          const summarySection = document.getElementById('summarySection');
-          const summaryContent = document.getElementById('summaryContent');
-          if (summarySection && summaryContent) {
-            summarySection.style.display = 'block';
-            summarySection.classList.add('expanded');  // Expand so content is visible
-            summaryContent.innerHTML = sanitizeHTML(currentMetadata.summary);
-            updateSummaryPreview();
-          }
-        } else if (currentResult?.full_text) {
-          // Auto-generate summary on load if not already present
-          autoGenerateSummary();
-        }
+        // Summary is now accessed via the "AI Summary" format toggle option
       } else {
         showEmptyState();
       }
@@ -226,45 +185,18 @@ async function loadTranscriptData() {
   });
 }
 
-// Auto-generate AI summary on page load
-async function autoGenerateSummary() {
-  const apiKey = await getOpenAIApiKey();
-  if (!apiKey) {
-    console.log('[Voxly] No OpenAI API key - skipping auto-summary');
-    return;
-  }
-
-  const summarySection = document.getElementById('summarySection');
-  const summaryContent = document.getElementById('summaryContent');
-  const summaryPreview = document.getElementById('summaryPreview');
-
-  summarySection.style.display = 'block';
-  summarySection.classList.add('expanded');  // Expand so content is visible
-  summaryContent.innerHTML = '<div class="summary-loading"><div class="spinner"></div>Generating AI Summary...</div>';
-  if (summaryPreview) {
-    summaryPreview.textContent = 'Generating AI Summary...';
-  }
-
-  try {
-    const summary = await generateSummary(apiKey, currentResult.full_text);
-    summaryContent.innerHTML = sanitizeHTML(summary);
-    currentMetadata.summary = summary;
-    await chrome.storage.local.set({ transcriptMetadata: currentMetadata });
-    updateSummaryPreview();
-    showStatus('AI Summary generated!', 'success');
-  } catch (e) {
-    console.error('[Voxly] Auto-summary failed:', e);
-    summaryContent.textContent = 'Failed to generate summary. Click Regenerate Summary to try again.';
-    if (summaryPreview) {
-      summaryPreview.textContent = 'Summary generation failed. Click to expand...';
-    }
-  }
-}
+// autoGenerateSummary removed — AI Summary now generated on-demand via format toggle
 
 // Display the transcript based on current format
 function displayTranscript() {
   emptyState.style.display = 'none';
   transcriptContainer.innerHTML = '';
+
+  // AI Summary format uses the same container
+  if (currentFormat === 'summary') {
+    displayAISummary();
+    return;
+  }
 
   if (!currentResult?.segments || currentResult.segments.length === 0) {
     if (currentResult?.full_text) {
@@ -285,6 +217,40 @@ function displayTranscript() {
       break;
     default:
       displayParagraph();
+  }
+}
+
+// Display AI summary in the transcript container
+async function displayAISummary() {
+  if (currentMetadata?.summary) {
+    transcriptContainer.innerHTML = sanitizeHTML(currentMetadata.summary);
+    return;
+  }
+
+  // No summary yet — try to generate one
+  const apiKey = await getOpenAIApiKey();
+  if (!apiKey) {
+    transcriptContainer.innerHTML = '<p style="color:#6b6b6b;">Add your OpenAI API key in <a href="options.html" target="_blank" style="color:#0080FF;">Settings</a> to generate AI summaries.</p>';
+    return;
+  }
+
+  if (!currentResult?.full_text) {
+    transcriptContainer.innerHTML = '<p style="color:#6b6b6b;">No transcript available to summarize.</p>';
+    return;
+  }
+
+  // Generate summary
+  transcriptContainer.innerHTML = '<div class="summary-loading"><div class="spinner"></div>Generating AI Summary...</div>';
+
+  try {
+    const summary = await generateSummary(apiKey, currentResult.full_text);
+    transcriptContainer.innerHTML = sanitizeHTML(summary);
+    currentMetadata.summary = summary;
+    await chrome.storage.local.set({ transcriptMetadata: currentMetadata });
+    showStatus('AI Summary generated!', 'success');
+  } catch (e) {
+    transcriptContainer.innerHTML = '<p style="color:#dc3545;">Failed to generate summary. Check your OpenAI API key and try again.</p>';
+    showStatus(`Error: ${e.message}`, 'error');
   }
 }
 
@@ -575,7 +541,8 @@ function updateTranscriptLabel() {
   const labels = {
     'segmented': '📄 Segmented Timestamps',
     'paragraph': '📄 Full Transcript',
-    'prose': '📄 No Timestamps'
+    'prose': '📄 No Timestamps',
+    'summary': '✨ AI Summary'
   };
   const transcriptLabel = document.getElementById('transcriptLabel');
   if (transcriptLabel) {
@@ -605,14 +572,6 @@ function setupButtons() {
   editMetaBtn.addEventListener('click', () => {
     toggleMetadataEdit();
   });
-
-  // Edit Summary button
-  const editSummaryBtn = document.getElementById('editSummaryBtn');
-  if (editSummaryBtn) {
-    editSummaryBtn.addEventListener('click', () => {
-      toggleSummaryEdit();
-    });
-  }
 
   // Export button
   exportBtn.addEventListener('click', (e) => {
@@ -665,33 +624,9 @@ function setupButtons() {
       showEmptyState();
       transcriptContainer.innerHTML = '';
       emptyState.style.display = 'block';
-      // Also hide summary
-      document.getElementById('summarySection').classList.remove('active');
       showStatus('Transcript cleared', 'success');
     }
   });
-
-  // Summarize button
-  const summarizeBtn = document.getElementById('summarizeBtn');
-  if (summarizeBtn) {
-    summarizeBtn.addEventListener('click', handleSummarize);
-  }
-
-  // Copy summary button
-  const copySummaryBtn = document.getElementById('copySummaryBtn');
-  if (copySummaryBtn) {
-    copySummaryBtn.addEventListener('click', async () => {
-      const summaryContent = document.getElementById('summaryContent');
-      if (summaryContent && summaryContent.textContent) {
-        try {
-          await navigator.clipboard.writeText(summaryContent.textContent);
-          showStatus('Summary copied to clipboard!', 'success');
-        } catch (err) {
-          showStatus('Failed to copy summary', 'error');
-        }
-      }
-    });
-  }
 
   // Upgrade modal buttons
   setupUpgradeModal();
@@ -753,49 +688,7 @@ async function getOpenAIApiKey() {
   });
 }
 
-// Handle summarize button click
-async function handleSummarize() {
-  // Summarization is a baseline feature - freemium gate is usage count only
-  // (checked at transcription time in sidepanel.js)
-
-  // Check if we have a transcript
-  if (!currentResult?.full_text) {
-    showStatus('No transcript available to summarize', 'error');
-    return;
-  }
-
-  // Check for API key
-  const apiKey = await getOpenAIApiKey();
-  if (!apiKey) {
-    showStatus('Add your OpenAI API key in Settings to use summarization', 'error');
-    return;
-  }
-
-  // Show loading state
-  const summarySection = document.getElementById('summarySection');
-  const summaryContent = document.getElementById('summaryContent');
-
-  summarySection.style.display = 'block';
-  summarySection.classList.add('expanded');  // Expand so content is visible
-  summaryContent.innerHTML = '<div class="summary-loading"><div class="spinner"></div>Generating summary...</div>';
-
-  try {
-    const summary = await generateSummary(apiKey, currentResult.full_text);
-    summaryContent.innerHTML = sanitizeHTML(summary);
-    updateSummaryPreview();
-
-    // Store summary in metadata
-    currentMetadata.summary = summary;
-    await chrome.storage.local.set({
-      transcriptMetadata: currentMetadata
-    });
-
-    showStatus('Summary generated!', 'success');
-  } catch (e) {
-    summaryContent.innerHTML = 'Failed to generate summary. Please check your API key and try again.';
-    showStatus(`Error: ${e.message}`, 'error');
-  }
-}
+// handleSummarize removed — AI Summary is now a format option in the format toggle
 
 // Call OpenAI API to generate summary
 async function generateSummary(apiKey, text) {
@@ -888,33 +781,7 @@ function toggleMetadataEdit() {
   }
 }
 
-// State for summary editing
-let isEditingSummary = false;
-
-// Toggle summary edit mode
-function toggleSummaryEdit() {
-  isEditingSummary = !isEditingSummary;
-
-  const summaryContent = document.getElementById('summaryContent');
-  const editSummaryBtn = document.getElementById('editSummaryBtn');
-
-  if (summaryContent) {
-    summaryContent.contentEditable = isEditingSummary;
-    summaryContent.classList.toggle('editable', isEditingSummary);
-  }
-
-  if (editSummaryBtn) {
-    editSummaryBtn.classList.toggle('active', isEditingSummary);
-    editSummaryBtn.textContent = isEditingSummary ? '💾 Save' : '✏️ Edit';
-  }
-
-  if (!isEditingSummary && summaryContent) {
-    // Save edited summary
-    currentMetadata.summary = summaryContent.innerHTML;
-    chrome.storage.local.set({ transcriptMetadata: currentMetadata });
-    showStatus('Summary saved', 'success');
-  }
-}
+// toggleSummaryEdit removed — summary editing uses the same edit button as transcripts
 
 // Save edited metadata
 async function saveMetadataEdits() {
@@ -961,6 +828,13 @@ function toggleEditMode() {
 
 // Save edited content
 async function saveEditedContent() {
+  // AI Summary format — save to metadata, not transcript
+  if (currentFormat === 'summary') {
+    currentMetadata.summary = transcriptContainer.innerHTML;
+    await chrome.storage.local.set({ transcriptMetadata: currentMetadata });
+    return;
+  }
+
   // For segmented/paragraph view, try to extract from DOM
   if (currentFormat === 'segmented' && currentResult?.segments) {
     const segments = transcriptContainer.querySelectorAll('.segment');
@@ -992,6 +866,11 @@ async function saveEditedContent() {
 
 // Get formatted text based on current view mode
 function getFormattedText() {
+  // AI Summary — copy the summary text
+  if (currentFormat === 'summary') {
+    return currentMetadata?.summary ? transcriptContainer.textContent : '';
+  }
+
   if (!currentResult?.segments || currentResult.segments.length === 0) {
     return currentResult?.full_text || transcriptContainer.textContent;
   }
