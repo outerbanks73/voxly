@@ -32,7 +32,8 @@ async function canUseCloudFeatures() {
 // Sign in with OAuth provider (Google, GitHub)
 async function cloudSignInWithOAuth(provider) {
   const sb = getSupabase();
-  const redirectUrl = chrome.runtime.getURL('auth-callback.html');
+  // Use chromiumapp.org redirect (already whitelisted in Supabase)
+  const redirectUrl = `https://${chrome.runtime.id}.chromiumapp.org/`;
 
   // Build the Supabase OAuth URL
   const { data, error } = await sb.auth.signInWithOAuth({
@@ -51,31 +52,39 @@ async function cloudSignInWithOAuth(provider) {
     let settled = false;
 
     const cleanup = () => {
-      chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.tabs.onUpdated.removeListener(onTabUpdated);
       chrome.windows.onRemoved.removeListener(onWindowRemoved);
     };
 
-    // Listen for the callback message from auth-callback.html
-    const messageListener = async (request, sender, sendResponse) => {
-      if (request.action !== 'oauthCallback') return;
+    // Watch for the tab navigating to the redirect URL (contains tokens in hash)
+    const onTabUpdated = async (tabId, changeInfo, tab) => {
+      if (!authWindowId || tab.windowId !== authWindowId) return;
+
+      // Use tab.url (includes hash fragment) with fallback to changeInfo.url
+      const url = tab.url || changeInfo.url || '';
+      if (!url.startsWith(redirectUrl)) return;
+
       if (settled) return;
       settled = true;
       cleanup();
 
       // Close the auth popup
-      if (authWindowId) {
-        chrome.windows.remove(authWindowId).catch(() => {});
-      }
-
-      if (request.error) {
-        reject(new Error(request.error));
-        return;
-      }
+      chrome.windows.remove(authWindowId).catch(() => {});
 
       try {
+        const parsedUrl = new URL(url);
+        const hashParams = new URLSearchParams(parsedUrl.hash.substring(1));
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+
+        if (!accessToken || !refreshToken) {
+          reject(new Error('Missing tokens in auth response'));
+          return;
+        }
+
         const { data: sessionData, error: sessionError } = await sb.auth.setSession({
-          access_token: request.accessToken,
-          refresh_token: request.refreshToken
+          access_token: accessToken,
+          refresh_token: refreshToken
         });
 
         if (sessionError) {
@@ -99,7 +108,7 @@ async function cloudSignInWithOAuth(provider) {
       reject(new Error('Sign-in cancelled'));
     };
 
-    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.tabs.onUpdated.addListener(onTabUpdated);
     chrome.windows.onRemoved.addListener(onWindowRemoved);
 
     // Open a compact popup window (500x700) instead of full browser window
@@ -149,7 +158,7 @@ async function cloudSignUpWithEmail(email, password) {
 // Sign in with magic link (passwordless)
 async function cloudSignInWithMagicLink(email) {
   const sb = getSupabase();
-  const redirectUrl = chrome.runtime.getURL('auth-callback.html');
+  const redirectUrl = `https://${chrome.runtime.id}.chromiumapp.org/`;
   const { error } = await sb.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: redirectUrl }

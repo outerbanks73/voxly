@@ -229,6 +229,7 @@ function showUpgradeModal() {
 
 // Check cloud authentication status and update UI
 async function checkCloudStatusAndUpdateUI() {
+  const signInLink = 'Sign in required. <a href="options.html" target="_blank" style="color:inherit;text-decoration:underline;">Click here</a>';
   try {
     const authenticated = await isCloudAuthenticated();
     if (authenticated) {
@@ -236,12 +237,12 @@ async function checkCloudStatusAndUpdateUI() {
       statusText.textContent = 'Cloud ready';
     } else {
       statusBar.className = 'status-bar disconnected';
-      statusText.textContent = 'Sign in required';
+      statusText.innerHTML = signInLink;
     }
     return authenticated;
   } catch (e) {
     statusBar.className = 'status-bar disconnected';
-    statusText.textContent = 'Sign in required';
+    statusText.innerHTML = signInLink;
     return false;
   }
 }
