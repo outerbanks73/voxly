@@ -51,15 +51,20 @@
           │
           ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                 Supabase Edge Functions (NEW)                     │
-│  ┌────────────────┐ ┌────────────────┐ ┌──────────────────┐     │
-│  │   transcribe   │ │ transcribe-url │ │youtube-transcript│     │
-│  │  (JWT + quota) │ │ (JWT + quota)  │ │  (rate limited)  │     │
-│  └───────┬────────┘ └───────┬────────┘ └────────┬─────────┘     │
-│          │                  │                    │               │
-│          ▼                  ▼                    ▼               │
-│      Deepgram          yt-dlp equiv       YouTube Data API      │
-│      Nova-2            + Deepgram         (captions only)       │
+│                 Supabase Edge Functions                           │
+│  ┌────────────────┐ ┌──────────────────────────────────────┐    │
+│  │   transcribe   │ │         transcribe-url                │    │
+│  │  (JWT + quota) │ │  (JWT + quota, cascade logic)         │    │
+│  └───────┬────────┘ └───────┬──────────────────────────────┘    │
+│          │                  │                                    │
+│          ▼                  ▼ (cascade — cheapest first)         │
+│      Deepgram         1. YouTube captions (free)                 │
+│      Nova-2           2. Supadata.ai (social platforms)          │
+│                       3. Deepgram Nova-2 (fallback)              │
+│                                                                  │
+│  ┌──────────────────┐                                            │
+│  │  realtime-token  │ → Temp Deepgram key for WebSocket         │
+│  └──────────────────┘                                            │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -256,7 +261,7 @@ file: (binary audio data)
 
 ### 5.2 `transcribe-url` (NEW)
 
-**Purpose:** Download audio from a URL and transcribe via Deepgram. For YouTube URLs, attempt free caption extraction first.
+**Purpose:** Transcribe content from any public URL using a cost-optimized cascade strategy. Tries the cheapest/fastest method first, falling back to progressively more expensive options.
 
 | Property | Value |
 |----------|-------|
@@ -273,45 +278,63 @@ file: (binary audio data)
 }
 ```
 
+**Transcription Cascade:**
+
+The Edge Function applies different cascade strategies based on the URL platform:
+
+**YouTube URLs** (`youtube.com/watch`, `youtu.be/`, `youtube.com/shorts/`, `youtube.com/live/`):
+
+1. **YouTube Captions** (free, ~1s) — Extract existing captions via `youtube_transcript_api`. Most YouTube videos have auto-generated or manual captions. Zero API cost.
+2. **Supadata.ai** (~5-15s) — If no captions available, Supadata downloads and transcribes. Handles most edge cases.
+3. **Deepgram Nova-2** (fallback) — If Supadata fails, download audio server-side and send to Deepgram pre-recorded API.
+
+**Social Platform URLs** (TikTok, Instagram, X/Twitter, Facebook):
+
+1. **Supadata.ai** — Primary method. Supadata handles platform-specific extraction.
+2. **Deepgram Nova-2** (fallback) — If Supadata fails, attempt direct audio download + Deepgram transcription.
+
+**Other URLs** (podcasts, direct media links, etc.):
+
+1. **Supadata.ai** — Try Supadata first (handles many podcast hosts, media platforms).
+2. **Deepgram Nova-2** (fallback) — Download audio directly and transcribe via Deepgram.
+
 **Processing:**
 
 1. Validate JWT, check quota (same as `transcribe`)
-2. If YouTube URL → try `youtube-transcript` logic first (free, no Deepgram cost)
-3. If captions unavailable or non-YouTube → download audio via Deno-compatible fetch/streaming
-4. Send downloaded audio to Deepgram Nova-2
-5. Normalize and return
+2. Detect platform from URL
+3. Execute cascade: try each method in order, move to next on failure
+4. Normalize result from whichever method succeeds
+5. Increment usage (only counted once regardless of cascade steps)
+6. Return result with `metadata.method` indicating which cascade step succeeded
 
-**YouTube detection:** Match against `youtube.com/watch`, `youtu.be/`, `youtube.com/shorts/`, `youtube.com/live/` patterns.
-
-**Response:** Same format as `transcribe`.
-
-### 5.3 `youtube-transcript` (NEW)
-
-**Purpose:** Extract YouTube captions without transcription. Zero API cost.
-
-| Property | Value |
-|----------|-------|
-| Auth | None (public endpoint) |
-| Method | POST (JSON) |
-| Rate limit | 30 requests/minute per IP |
-
-**Request:**
+**Response:** Same format as `transcribe`, with additional metadata:
 
 ```json
 {
-  "url": "https://youtube.com/watch?v=abc123",
-  "language": "en"
+  "metadata": {
+    "method": "youtube_captions|supadata|deepgram",
+    "cascade_steps": ["youtube_captions:failed", "supadata:success"]
+  }
 }
 ```
+
+**Response:** Same format as `transcribe`.
+
+### 5.3 YouTube Caption Extraction (Internal to `transcribe-url`)
+
+**Purpose:** Extract YouTube captions as the first step in the URL transcription cascade. Zero API cost. Not a standalone endpoint — this logic lives inside `transcribe-url`.
+
+**Implementation:** Uses `youtube_transcript_api` (Python library, ported to Deno/TypeScript or called via a helper). Extracts auto-generated or manual captions from YouTube videos.
 
 **Processing:**
 
 1. Extract video ID from URL
-2. Fetch available caption tracks from YouTube
-3. Parse captions into segments with timestamps
-4. Return normalized result
+2. Fetch available caption tracks (auto-generated + manual)
+3. Prefer manual captions; fall back to auto-generated
+4. Parse captions into segments with timestamps
+5. If no captions available, return failure signal to trigger next cascade step
 
-**Response (200):**
+**Normalized output (when successful):**
 
 ```json
 {
@@ -320,29 +343,26 @@ file: (binary audio data)
     { "start": 0.0, "end": 3.2, "text": "..." }
   ],
   "metadata": {
-    "source": "youtube_transcript",
-    "duration": 600.0,
+    "method": "youtube_captions",
     "language": "en",
-    "model": "youtube_captions",
-    "word_count": 2500,
-    "speakers": []
+    "model": "youtube_captions"
   }
 }
 ```
 
-**Error responses:**
-
-| Status | Body | When |
-|--------|------|------|
-| 400 | `{ "error": "invalid_url" }` | Not a valid YouTube URL |
-| 404 | `{ "error": "no_captions" }` | Video has no captions in requested language |
-| 429 | `{ "error": "rate_limited" }` | Exceeded 30 req/min |
+**Failure modes that trigger cascade fallback:**
+- Video has no captions in any language
+- Video is age-restricted or private
+- YouTube API rate limiting
+- Network/parsing errors
 
 ### 5.4 Edge Function Environment Variables
 
 | Variable | Function(s) | Description |
 |----------|-------------|-------------|
-| `DEEPGRAM_API_KEY` | `transcribe`, `transcribe-url` | Voxly's Deepgram Nova-2 key |
+| `DEEPGRAM_API_KEY` | `transcribe`, `transcribe-url`, `realtime-token` | Voxly's Deepgram Nova-2 key |
+| `DEEPGRAM_PROJECT_ID` | `realtime-token` | Deepgram project for scoped temporary keys |
+| `SUPADATA_API_KEY` | `transcribe-url` | Supadata.ai API key for social platform transcription |
 
 Standard Supabase env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`) are available automatically.
 
@@ -419,10 +439,15 @@ Edge Functions use the service role key to read/write this table (users can only
 
 | Item | Rate |
 |------|------|
+| YouTube captions (youtube_transcript_api) | Free |
+| Supadata.ai | Per-request pricing (see Supadata plan) |
 | Deepgram Nova-2 | $0.0043/min |
-| Average transcription | ~10 min → $0.043 |
-| Free tier cost (15 × 10min) | $0.645/user/month |
+| Average file transcription | ~10 min → $0.043 |
+| Average URL transcription (YouTube w/ captions) | $0.00 (free cascade step) |
+| Free tier cost (worst case, 15 × 10min Deepgram) | $0.645/user/month |
 | Supabase Edge Function | Free tier covers initial scale |
+
+**Cascade cost optimization:** Most YouTube videos have auto-generated captions, so the majority of YouTube URL transcriptions cost nothing. The cascade ensures Deepgram (most expensive) is only used as a last resort.
 
 ### 7.4 Abuse Prevention
 
@@ -516,25 +541,28 @@ User selects file → TranscriptionService (cloud adapter)
 → (Premium) cloud-sync.js upserts to Supabase (same as v2.0)
 ```
 
-### 10.2 Cloud URL Transcription
+### 10.2 Cloud URL Transcription (Cascade)
 
 ```
 User enters URL → TranscriptionService (cloud adapter)
 → POST URL to Edge Function /transcribe-url (JWT auth)
-→ Edge Function: validate JWT, check quota
-→ If YouTube URL: try caption extraction first (free)
-→ If captions found: normalize and return (no Deepgram cost)
-→ If no captions or non-YouTube: download audio, send to Deepgram
-→ Return to extension → Render → (optional) cloud sync
-```
+→ Edge Function: validate JWT, check quota, detect platform
 
-### 10.3 YouTube Transcript (No Auth)
+YouTube URLs:
+  Step 1: youtube_transcript_api → extract captions (free, ~1s)
+  Step 2: If no captions → Supadata.ai → transcribe (~5-15s)
+  Step 3: If Supadata fails → Deepgram Nova-2 (download + transcribe)
 
-```
-User enters YouTube URL → TranscriptionService detects YouTube
-→ POST to Edge Function /youtube-transcript (no auth)
-→ Edge Function: extract video ID, fetch captions
-→ Parse and normalize → Return to extension
+Social URLs (TikTok, Instagram, X, Facebook):
+  Step 1: Supadata.ai → platform extraction (~5-15s)
+  Step 2: If fails → Deepgram Nova-2 (download + transcribe)
+
+Other URLs:
+  Step 1: Supadata.ai → try extraction (~5-15s)
+  Step 2: If fails → Deepgram Nova-2 (download + transcribe)
+
+→ First successful step returns → normalize result
+→ Increment usage (once) → Return to extension
 → Render → (optional) cloud sync
 ```
 
@@ -625,7 +653,9 @@ Quota enforcement testing. File size validation edge cases. Error handling for a
 
 | Package | Purpose | Where |
 |---------|---------|-------|
-| Deepgram Nova-2 API | Cloud speech recognition | Edge Functions (server-side) |
+| Deepgram Nova-2 API | Cloud speech recognition (file uploads, cascade fallback) | Edge Functions (server-side) |
+| Supadata.ai API | Social platform transcript extraction (YouTube, TikTok, Instagram, X, Facebook) | Edge Functions (server-side) |
+| `youtube_transcript_api` equivalent | Free YouTube caption extraction (cascade step 1 for YouTube URLs) | Edge Functions (server-side) |
 
 ### 14.2 Edge Function Runtime
 

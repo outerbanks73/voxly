@@ -21,18 +21,22 @@ Voxly is a cloud-enabled audio transcription platform that transforms audio and 
 
 | Method | Description |
 |--------|-------------|
-| **File Upload** | User selects local audio/video file |
-| **URL** | User provides URL to audio/video (YouTube, podcasts, etc.) |
-| **Tab Recording** | Captures audio from active browser tab (Voxly Desktop only for real-time) |
-| **YouTube Transcript** | Extract existing YouTube captions without transcription |
+| **File Upload** | User selects local audio/video file (.mp3, .mp4, .m4a, .wav, .webm, .mov, .mkv, .ogg, .flac, .aac, .wma, .opus, .avi, .ts, .3gp) |
+| **URL** | User provides URL — supports YouTube, TikTok, Instagram, X/Twitter, Facebook, and any public media URL |
+| **Tab Recording** | Captures audio from active browser tab via tabCapture or getDisplayMedia fallback |
+| **YouTube Transcript** | Extract existing YouTube captions without transcription (free, via cascade step 1) |
 
 ### 2.2 Transcription Engines
 
 | Engine | Description |
 |--------|-------------|
-| **Cloud (Deepgram Nova-2)** | Default. No local setup required. Managed by Voxly. |
+| **Cloud (Deepgram Nova-2)** | Default for file uploads. Also used as final fallback for URL transcription. |
+| **YouTube Captions** | Free caption extraction for YouTube URLs. First cascade step — zero cost. |
+| **Supadata.ai** | Social platform transcription (YouTube fallback, TikTok, Instagram, X, Facebook). |
 | **Custom API** | User-configured endpoint (self-hosted Whisper, AssemblyAI, etc.) |
 | **Voxly Desktop (Local)** | Local Python server with faster-whisper. Full offline capability. |
+
+**URL Transcription Cascade:** For URL-based transcription, Voxly uses a cost-optimized cascade — cheapest/fastest method first, falling back to progressively more expensive options. YouTube URLs try free caption extraction first, then Supadata, then Deepgram. Social platform URLs try Supadata first, then Deepgram. This minimizes per-transcription cost while maximizing reliability.
 
 ### 2.3 Transcription Options
 
@@ -147,12 +151,11 @@ Query parameters for list: `page`, `page_size` (max 100), `search` (full-text).
 
 ### 2.5.0 (Current)
 - Cloud transcription — Deepgram Nova-2 as default engine, no local setup required
-- Custom API support — Users can configure their own transcription endpoint
-- Voxly Desktop — Local Python server preserved as opt-in mode for privacy/offline use
+- Cost-optimized URL cascade — YouTube captions (free) → Supadata.ai → Deepgram Nova-2 fallback
+- Multi-platform URL support — YouTube, TikTok, Instagram, X/Twitter, Facebook, and any public URL
 - Usage quotas — Free tier (15 cloud transcriptions/month), unlimited for premium
-- YouTube transcript extraction via cloud — No local server needed for caption extraction
-- URL transcription via cloud — Download and transcribe URLs without local yt-dlp
-- Mode selection — Cloud, Custom API, or Voxly Desktop in Settings
+- Tab recording with getDisplayMedia fallback — Works on any page including Google Meet
+- AI Summary as transcript format option — Generate summaries on-demand alongside timestamps
 - Chrome Web Store ready — Core functionality works without any local installation
 
 ### 2.0.0
@@ -200,7 +203,8 @@ Query parameters for list: `page`, `page_size` (max 100), `search` (full-text).
 | ffmpeg | Audio conversion | System |
 | torch | ML backend | 2.0+ |
 | supabase-js | Cloud client (extension) | 2.x |
-| Deepgram Nova-2 | Cloud speech recognition (API) | v1 |
+| Deepgram Nova-2 | Cloud speech recognition — file uploads + cascade fallback (API) | v1 |
+| Supadata.ai | Social platform transcript extraction — YouTube, TikTok, Instagram, X, Facebook (API) | v1 |
 
 ---
 
