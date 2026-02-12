@@ -397,7 +397,11 @@ async function transcribeFile(file) {
   } catch (e) {
     hideProgress();
     hideResult();
-    showError(`Transcription failed: ${e.message}`);
+    if (e.message.includes('quota exceeded')) {
+      showUpgradeModal();
+    } else {
+      showError(`Transcription failed: ${e.message}`);
+    }
   }
 }
 
@@ -456,8 +460,9 @@ async function transcribeUrl(url) {
   } catch (e) {
     hideProgress();
     hideResult();
-    // Parse Supadata/provider errors into friendly messages
-    if (e.message.includes('invalid-request') || e.message.includes('could not be detected') || e.message.includes('Supadata error')) {
+    if (e.message.includes('quota exceeded')) {
+      showUpgradeModal();
+    } else if (e.message.includes('invalid-request') || e.message.includes('could not be detected') || e.message.includes('Supadata error')) {
       // Detect Google Drive specifically
       const urlInput = document.getElementById('urlInput').value.trim();
       if (urlInput.includes('drive.google.com') || urlInput.includes('docs.google.com')) {
@@ -794,7 +799,11 @@ async function transcribeRecording(blob) {
     trySyncOrQueue(currentResult, currentMetadata);
   } catch (e) {
     hideProgress();
-    showError(`Transcription failed: ${e.message}`);
+    if (e.message.includes('quota exceeded')) {
+      showUpgradeModal();
+    } else {
+      showError(`Transcription failed: ${e.message}`);
+    }
   }
 }
 
