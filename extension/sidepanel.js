@@ -333,7 +333,7 @@ async function transcribeFile(file) {
 
   const authenticated = await isCloudAuthenticated();
   if (!authenticated) {
-    showError('Please sign in to use cloud transcription. Go to Settings to sign in.');
+    showError('Please sign in to use cloud transcription. <a href="options.html" target="_blank" style="color:#0080FF;text-decoration:underline;">Open Settings to sign in</a>', true);
     return;
   }
 
@@ -382,7 +382,7 @@ async function transcribeUrl(url) {
 
   const authenticated = await isCloudAuthenticated();
   if (!authenticated) {
-    showError('Please sign in to use cloud transcription. Go to Settings to sign in.');
+    showError('Please sign in to use cloud transcription. <a href="options.html" target="_blank" style="color:#0080FF;text-decoration:underline;">Open Settings to sign in</a>', true);
     return;
   }
 
@@ -689,7 +689,7 @@ async function transcribeRecording(blob) {
 
   const authenticated = await isCloudAuthenticated();
   if (!authenticated) {
-    showError('Please sign in to use cloud transcription. Go to Settings to sign in.');
+    showError('Please sign in to use cloud transcription. <a href="options.html" target="_blank" style="color:#0080FF;text-decoration:underline;">Open Settings to sign in</a>', true);
     return;
   }
 
@@ -732,8 +732,12 @@ async function transcribeRecording(blob) {
 }
 
 // UI helpers
-function showError(message) {
-  errorMessage.textContent = message;
+function showError(message, isHtml = false) {
+  if (isHtml) {
+    errorMessage.innerHTML = message;
+  } else {
+    errorMessage.textContent = message;
+  }
   errorMessage.style.display = 'block';
 }
 
