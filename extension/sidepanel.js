@@ -103,10 +103,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }, 1500);
 
-  // Update URL and title when user navigates to a different page
+  // Update URL and title when user navigates to a different page.
+  // Must check both changeInfo.url (SPA navigation like YouTube) and
+  // changeInfo.status === 'complete' (full page loads).
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'complete') {
-      // Only update if the URL tab is currently active
+    if (changeInfo.url || changeInfo.status === 'complete') {
       const urlTab = document.querySelector('.tab[data-tab="url"]');
       if (urlTab && urlTab.classList.contains('active')) {
         autoPopulateUrl();
@@ -114,7 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Update URL and title when user switches to a different tab
+  // Update URL and title when user switches to a different browser tab
   chrome.tabs.onActivated.addListener(() => {
     const urlTab = document.querySelector('.tab[data-tab="url"]');
     if (urlTab && urlTab.classList.contains('active')) {
@@ -516,7 +517,11 @@ async function startRecording() {
       await startRealtimeSession(stream);
     } else {
       // Standard mode: record everything, transcribe at end
-      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      // Use the best supported audio format
+      const recorderMime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/ogg') ? 'audio/ogg'
+        : undefined; // Let browser choose default
+      mediaRecorder = new MediaRecorder(stream, recorderMime ? { mimeType: recorderMime } : {});
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -526,7 +531,8 @@ async function startRecording() {
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
-        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+        const actualMime = mediaRecorder.mimeType || 'audio/webm';
+        const blob = new Blob(recordedChunks, { type: actualMime });
         await transcribeRecording(blob);
       };
 
@@ -776,7 +782,10 @@ async function transcribeRecording(blob) {
   };
 
   try {
-    const file = new File([blob], 'recording.webm', { type: 'audio/webm' });
+    // Use the blob's actual MIME type (may be audio/webm, video/webm, etc.)
+    const blobType = blob.type || 'audio/webm';
+    const ext = blobType.includes('webm') ? 'webm' : blobType.includes('ogg') ? 'ogg' : 'webm';
+    const file = new File([blob], `recording.${ext}`, { type: blobType });
     const result = await transcriptionService.transcribeFile(file, (progress) => {
       updateProgress(progress);
     });
@@ -900,19 +909,21 @@ async function autoPopulateUrl() {
 
     // Skip chrome:// and other internal URLs
     if (tab.url.startsWith('chrome://') || tab.url.startsWith('about:') || tab.url.startsWith('chrome-extension://')) {
+      hideVideoTitle();
       return;
     }
 
     // Always populate the URL field with the current tab
     document.getElementById('urlInput').value = tab.url;
 
-    // Try to fetch real title via oEmbed
-    await fetchVideoTitle(tab.url);
-
-    // Fallback to tab title if oEmbed didn't return a title
-    if (!detectedVideoTitle && tab.title) {
+    // Show tab title immediately as preview while oEmbed loads
+    if (tab.title) {
+      detectedVideoTitle = tab.title;
       showVideoTitle(tab.title);
     }
+
+    // Try to fetch real title via oEmbed (overrides tab title if found)
+    await fetchVideoTitle(tab.url);
   } catch (e) {
     // Silently fail if we can't get the tab URL
   }
