@@ -102,6 +102,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateLibraryLink();
     }
   }, 1500);
+
+  // Update URL and title when user navigates to a different page
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status === 'complete') {
+      // Only update if the URL tab is currently active
+      const urlTab = document.querySelector('.tab[data-tab="url"]');
+      if (urlTab && urlTab.classList.contains('active')) {
+        autoPopulateUrl();
+      }
+    }
+  });
+
+  // Update URL and title when user switches to a different tab
+  chrome.tabs.onActivated.addListener(() => {
+    const urlTab = document.querySelector('.tab[data-tab="url"]');
+    if (urlTab && urlTab.classList.contains('active')) {
+      autoPopulateUrl();
+    }
+  });
 });
 
 // Check if user is premium subscriber
@@ -447,9 +466,15 @@ async function transcribeUrl(url) {
   } catch (e) {
     hideProgress();
     hideResult();
-    // Parse Supadata "invalid-request" errors into friendly messages
-    if (e.message.includes('invalid-request') || e.message.includes('could not be detected')) {
-      showError('This URL cannot be transcribed. Supported: YouTube, TikTok, Instagram, X, Facebook, and other streaming platforms. For other files, download them and use the Upload tab.');
+    // Parse Supadata/provider errors into friendly messages
+    if (e.message.includes('invalid-request') || e.message.includes('could not be detected') || e.message.includes('Supadata error')) {
+      // Detect Google Drive specifically
+      const urlInput = document.getElementById('urlInput').value.trim();
+      if (urlInput.includes('drive.google.com') || urlInput.includes('docs.google.com')) {
+        showError('Google Drive links cannot be transcribed directly. Download the file first, then use the Upload tab.');
+      } else {
+        showError('This URL cannot be transcribed. Supported: YouTube, TikTok, Instagram, X, Facebook, and other streaming platforms. For other files, download them and use the Upload tab.');
+      }
     } else {
       showError(`Transcription failed: ${e.message}`);
     }
@@ -462,7 +487,7 @@ async function startRecording() {
   isRealtimeMode = (mode === 'realtime');
 
   try {
-    // Get current tab
+    // Get current tab to check for Chrome internal pages
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     // Block recording on Chrome internal pages
@@ -471,8 +496,9 @@ async function startRecording() {
       return;
     }
 
-    // Request tab capture
-    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+    // Request tab capture — omit targetTabId so the side panel captures the
+    // active tab automatically without requiring activeTab permission
+    const streamId = await chrome.tabCapture.getMediaStreamId({});
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -528,8 +554,8 @@ async function startRecording() {
     }, 1000);
 
   } catch (e) {
-    if (e.message.includes('activeTab') || e.message.includes('not been invoked')) {
-      showError('Recording permission expired. Click the Voxly icon on your toolbar to refresh, then try recording again.');
+    if (e.message.includes('activeTab') || e.message.includes('not been invoked') || e.message.includes('Chrome pages cannot be captured')) {
+      showError('Cannot capture audio from this page. Try navigating to a website with audio content.');
     } else {
       showError(`Recording failed: ${e.message}`);
     }
