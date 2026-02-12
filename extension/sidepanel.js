@@ -468,6 +468,8 @@ async function transcribeUrl(url) {
         showError('Google Drive links cannot be transcribed directly. Download the file first, then use the Upload tab.');
       } else if (urlValue.includes('meet.google.com')) {
         showError('Google Meet links cannot be transcribed. To capture a meeting, use the Record tab while the meeting is active.');
+      } else if (urlValue.includes('podcasts.apple.com') || urlValue.includes('spotify.com') || urlValue.includes('music.amazon')) {
+        showError('Podcast platform links are not yet supported. Try pasting the direct episode URL from the podcast\'s website, or use the Upload tab with a downloaded episode.');
       } else {
         showError('This URL could not be transcribed. Supported: YouTube, TikTok, Instagram, X, Facebook, and other public video/audio URLs. For local files, use the Upload tab.');
       }
@@ -477,25 +479,12 @@ async function transcribeUrl(url) {
   }
 }
 
-// Start recording tab audio
-async function startRecording() {
-  const mode = document.getElementById('recordingMode').value;
-  isRealtimeMode = (mode === 'realtime');
-
+// Obtain an audio stream from the current tab.
+// Tries chrome.tabCapture first (seamless), falls back to getDisplayMedia (shows picker).
+async function getTabAudioStream() {
+  // Method 1: chrome.tabCapture — works when extension was recently activated
   try {
-    // Get current tab to check for Chrome internal pages
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    // Block recording on Chrome internal pages
-    if (!tab?.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('edge://')) {
-      showError('Cannot record this page. Navigate to a website with audio and try again.');
-      return;
-    }
-
-    // Request tab capture — omit targetTabId so the side panel captures the
-    // active tab automatically without requiring activeTab permission
     const streamId = await chrome.tabCapture.getMediaStreamId({});
-
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
@@ -504,6 +493,38 @@ async function startRecording() {
         }
       }
     });
+    console.log('[Voxly] Tab capture succeeded (tabCapture API)');
+    return stream;
+  } catch (e) {
+    console.log('[Voxly] tabCapture failed, trying getDisplayMedia:', e.message);
+  }
+
+  // Method 2: getDisplayMedia — always works, shows Chrome's share dialog
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    audio: true,
+    video: true,
+    preferCurrentTab: true
+  });
+
+  // Discard video tracks — we only need the audio
+  stream.getVideoTracks().forEach(track => track.stop());
+
+  if (stream.getAudioTracks().length === 0) {
+    stream.getTracks().forEach(track => track.stop());
+    throw new Error('No audio captured. Make sure "Also share tab audio" is checked in the share dialog.');
+  }
+
+  console.log('[Voxly] Tab capture succeeded (getDisplayMedia fallback)');
+  return stream;
+}
+
+// Start recording tab audio
+async function startRecording() {
+  const mode = document.getElementById('recordingMode').value;
+  isRealtimeMode = (mode === 'realtime');
+
+  try {
+    const stream = await getTabAudioStream();
 
     recordedChunks = [];
 
@@ -512,10 +533,9 @@ async function startRecording() {
       await startRealtimeSession(stream);
     } else {
       // Standard mode: record everything, transcribe at end
-      // Use the best supported audio format
       const recorderMime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
         : MediaRecorder.isTypeSupported('audio/ogg') ? 'audio/ogg'
-        : undefined; // Let browser choose default
+        : undefined;
       mediaRecorder = new MediaRecorder(stream, recorderMime ? { mimeType: recorderMime } : {});
 
       mediaRecorder.ondataavailable = (e) => {
@@ -531,7 +551,7 @@ async function startRecording() {
         await transcribeRecording(blob);
       };
 
-      mediaRecorder.start(1000); // Collect data every second
+      mediaRecorder.start(1000);
     }
 
     recordingStartTime = Date.now();
@@ -555,8 +575,8 @@ async function startRecording() {
     }, 1000);
 
   } catch (e) {
-    if (e.message.includes('activeTab') || e.message.includes('not been invoked') || e.message.includes('Chrome pages cannot be captured')) {
-      showError('Cannot capture audio from this page. Try navigating to a website with audio content.');
+    if (e.message.includes('Permission denied') || e.message.includes('cancelled') || e.message.includes('AbortError')) {
+      showError('Recording cancelled. Click Start Recording and select the tab to share.');
     } else {
       showError(`Recording failed: ${e.message}`);
     }
