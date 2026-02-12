@@ -103,24 +103,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }, 1500);
 
-  // Update URL and title when user navigates to a different page.
+  // Update detected title when user navigates to a different page.
   // Must check both changeInfo.url (SPA navigation like YouTube) and
   // changeInfo.status === 'complete' (full page loads).
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (changeInfo.url || changeInfo.status === 'complete') {
-      const urlTab = document.querySelector('.tab[data-tab="url"]');
-      if (urlTab && urlTab.classList.contains('active')) {
-        autoPopulateUrl();
-      }
+      autoPopulateUrl();
     }
   });
 
-  // Update URL and title when user switches to a different browser tab
+  // Update detected title when user switches to a different browser tab
   chrome.tabs.onActivated.addListener(() => {
-    const urlTab = document.querySelector('.tab[data-tab="url"]');
-    if (urlTab && urlTab.classList.contains('active')) {
-      autoPopulateUrl();
-    }
+    autoPopulateUrl();
   });
 });
 
@@ -276,11 +270,6 @@ function setupTabs() {
 
       tab.classList.add('active');
       document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
-
-      // Re-populate URL and title when switching to URL tab
-      if (tab.dataset.tab === 'url') {
-        autoPopulateUrl();
-      }
     });
   });
 }

@@ -741,6 +741,12 @@
     <div class="tab" data-tab="record">Record</div>
   </div>
 
+  <!-- Detected page/video title — visible across all tabs -->
+  <div id="videoTitleDisplay" class="video-title-display" style="display: none;">
+    <div class="title-label">Detected:</div>
+    <div id="videoTitle" class="title-text"></div>
+  </div>
+
   <div id="errorMessage" class="error-message" style="display: none;"></div>
 
   <!-- File Upload Tab -->
@@ -764,12 +770,6 @@
     <p class="url-description">
       Paste any video or audio URL. Supports YouTube, TikTok, Instagram, X, Facebook, and any public URL.
     </p>
-
-    <!-- Video title preview -->
-    <div id="videoTitleDisplay" class="video-title-display" style="display: none;">
-      <div class="title-label">Detected:</div>
-      <div id="videoTitle" class="title-text"></div>
-    </div>
 
     <div class="form-group">
       <label>Audio/Video URL</label>
