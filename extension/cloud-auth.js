@@ -1,6 +1,6 @@
 // Voxly - Cloud Authentication
 // Handles OAuth login/logout, session management, and auth state broadcasting.
-// Uses chrome.identity.launchWebAuthFlow() for OAuth providers.
+// Uses chrome.windows.create() popup for OAuth providers.
 
 // Get current cloud user, or null if not logged in
 async function getCloudUser() {
@@ -32,7 +32,7 @@ async function canUseCloudFeatures() {
 // Sign in with OAuth provider (Google, GitHub)
 async function cloudSignInWithOAuth(provider) {
   const sb = getSupabase();
-  const redirectUrl = chrome.identity.getRedirectURL();
+  const redirectUrl = chrome.runtime.getURL('auth-callback.html');
 
   // Build the Supabase OAuth URL
   const { data, error } = await sb.auth.signInWithOAuth({
@@ -45,52 +45,86 @@ async function cloudSignInWithOAuth(provider) {
 
   if (error) throw error;
 
-  // Use chrome.identity to handle the OAuth flow in a popup
+  // Open a compact popup window for the OAuth flow
   return new Promise((resolve, reject) => {
-    chrome.identity.launchWebAuthFlow(
-      { url: data.url, interactive: true },
-      async (responseUrl) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
+    let authWindowId = null;
+    let settled = false;
 
-        if (!responseUrl) {
-          reject(new Error('No response URL from auth flow'));
-          return;
-        }
+    const cleanup = () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.windows.onRemoved.removeListener(onWindowRemoved);
+    };
 
-        try {
-          // Parse tokens from the redirect URL hash fragment
-          const url = new URL(responseUrl);
-          const hashParams = new URLSearchParams(url.hash.substring(1));
-          const accessToken = hashParams.get('access_token');
-          const refreshToken = hashParams.get('refresh_token');
+    // Listen for the callback message from auth-callback.html
+    const messageListener = async (request, sender, sendResponse) => {
+      if (request.action !== 'oauthCallback') return;
+      if (settled) return;
+      settled = true;
+      cleanup();
 
-          if (!accessToken || !refreshToken) {
-            reject(new Error('Missing tokens in auth response'));
-            return;
-          }
-
-          // Set the session in Supabase client
-          const { data: sessionData, error: sessionError } = await sb.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          });
-
-          if (sessionError) {
-            reject(sessionError);
-            return;
-          }
-
-          // Broadcast auth state change
-          await broadcastAuthStateChange(sessionData.user);
-          resolve(sessionData.user);
-        } catch (e) {
-          reject(e);
-        }
+      // Close the auth popup
+      if (authWindowId) {
+        chrome.windows.remove(authWindowId).catch(() => {});
       }
-    );
+
+      if (request.error) {
+        reject(new Error(request.error));
+        return;
+      }
+
+      try {
+        const { data: sessionData, error: sessionError } = await sb.auth.setSession({
+          access_token: request.accessToken,
+          refresh_token: request.refreshToken
+        });
+
+        if (sessionError) {
+          reject(sessionError);
+          return;
+        }
+
+        await broadcastAuthStateChange(sessionData.user);
+        resolve(sessionData.user);
+      } catch (e) {
+        reject(e);
+      }
+    };
+
+    // Handle user closing the popup without completing auth
+    const onWindowRemoved = (windowId) => {
+      if (windowId !== authWindowId) return;
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Sign-in cancelled'));
+    };
+
+    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.windows.onRemoved.addListener(onWindowRemoved);
+
+    // Open a compact popup window (500x700) instead of full browser window
+    const width = 500;
+    const height = 700;
+    const createOptions = {
+      url: data.url,
+      type: 'popup',
+      width,
+      height
+    };
+
+    if (typeof screen !== 'undefined') {
+      createOptions.left = Math.round((screen.availWidth - width) / 2);
+      createOptions.top = Math.round((screen.availHeight - height) / 2);
+    }
+
+    chrome.windows.create(createOptions, (win) => {
+      if (chrome.runtime.lastError) {
+        cleanup();
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      authWindowId = win.id;
+    });
   });
 }
 
@@ -115,7 +149,7 @@ async function cloudSignUpWithEmail(email, password) {
 // Sign in with magic link (passwordless)
 async function cloudSignInWithMagicLink(email) {
   const sb = getSupabase();
-  const redirectUrl = chrome.identity.getRedirectURL();
+  const redirectUrl = chrome.runtime.getURL('auth-callback.html');
   const { error } = await sb.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: redirectUrl }

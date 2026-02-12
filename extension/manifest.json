@@ -11,13 +11,17 @@
     "activeTab",
     "offscreen",
     "alarms",
-    "sidePanel",
-    "identity"
+    "sidePanel"
   ],
   "host_permissions": [
     "https://ohxuifdseybxckmprcry.supabase.co/*",
-    "wss://api.deepgram.com/*"
+    "wss://api.deepgram.com/*",
+    "https://noembed.com/*"
   ],
+  "web_accessible_resources": [{
+    "resources": ["auth-callback.html"],
+    "matches": ["https://*.supabase.co/*"]
+  }],
   "action": {
     "default_title": "Open Voxly",
     "default_icon": {

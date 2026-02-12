@@ -4,7 +4,7 @@
 
 // Upload a transcript to Supabase cloud storage
 async function syncTranscriptToCloud(result, metadata) {
-  if (!await canUseCloudFeatures()) return null;
+  if (!await isCloudAuthenticated()) return null;
 
   const sb = getSupabase();
   const user = await getCloudUser();

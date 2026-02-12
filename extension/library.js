@@ -11,8 +11,8 @@ let currentSearch = '';
 const PAGE_SIZE = 20;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const canUse = await canUseCloudFeatures();
-  if (!canUse) {
+  const authenticated = await isCloudAuthenticated();
+  if (!authenticated) {
     document.getElementById('authRequired').style.display = 'block';
     document.getElementById('libraryContent').style.display = 'none';
     return;

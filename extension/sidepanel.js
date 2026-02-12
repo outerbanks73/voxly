@@ -12,6 +12,7 @@ let recordingTimer = null;
 let currentResult = null; // Store the result for export
 let currentMetadata = null; // Store metadata for enriched exports
 let isRealtimeMode = false;
+let detectedVideoTitle = null;
 
 // Realtime WebSocket state
 let realtimeSocket = null;
@@ -399,6 +400,11 @@ async function transcribeUrl(url) {
     processed_at: new Date().toISOString()
   };
 
+  // Pre-populate title from URL detection if available
+  if (detectedVideoTitle) {
+    currentMetadata.title = detectedVideoTitle;
+  }
+
   try {
     const result = await transcriptionService.transcribeUrl(url, (progress) => {
       updateProgress(progress);
@@ -407,6 +413,7 @@ async function transcribeUrl(url) {
     hideProgress();
     currentResult = result;
 
+    // API title overrides detected title if present
     if (result.title) currentMetadata.title = result.title;
     if (result.language) currentMetadata.language = result.language;
     if (result.duration) currentMetadata.duration_seconds = result.duration;
@@ -825,8 +832,11 @@ async function autoPopulateUrl() {
     // Always populate the URL field with the current tab
     document.getElementById('urlInput').value = tab.url;
 
-    // Use tab title for preview (no server preflight needed)
-    if (tab.title) {
+    // Try to fetch real title via oEmbed
+    await fetchVideoTitle(tab.url);
+
+    // Fallback to tab title if oEmbed didn't return a title
+    if (!detectedVideoTitle && tab.title) {
       showVideoTitle(tab.title);
     }
   } catch (e) {
@@ -842,6 +852,7 @@ function setupUrlTitlePreview() {
   urlInput.addEventListener('input', (e) => {
     clearTimeout(debounceTimer);
     const url = e.target.value.trim();
+    detectedVideoTitle = null;
 
     // Hide title if URL is cleared
     if (!url) {
@@ -856,17 +867,36 @@ function setupUrlTitlePreview() {
       return; // Invalid URL, don't fetch
     }
 
-    // Debounce: just show a placeholder since we can't preflight without server
+    // Debounce: fetch real title via oEmbed
     debounceTimer = setTimeout(() => {
-      // Show the URL domain as title preview
-      try {
-        const urlObj = new URL(url);
-        showVideoTitle(urlObj.hostname);
-      } catch {
-        hideVideoTitle();
-      }
+      fetchVideoTitle(url);
     }, DEBOUNCE_DELAY_MS);
   });
+}
+
+// Fetch video/media title via oEmbed (YouTube, Vimeo, SoundCloud, etc.)
+async function fetchVideoTitle(url) {
+  try {
+    const response = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.title) {
+        detectedVideoTitle = data.title;
+        showVideoTitle(data.title);
+        return;
+      }
+    }
+  } catch (e) {
+    // oEmbed failed, fall back to hostname
+  }
+
+  // Fallback: show hostname
+  try {
+    const urlObj = new URL(url);
+    showVideoTitle(urlObj.hostname);
+  } catch {
+    hideVideoTitle();
+  }
 }
 
 // Show video title above URL input
