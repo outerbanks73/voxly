@@ -110,7 +110,10 @@ async function handleOAuthSignIn(provider) {
   try {
     await cloudSignInWithOAuth(provider);
     await updateCloudAuthUI();
-    statusEl.className = 'status-message';
+    statusEl.className = 'status-message success';
+    statusEl.textContent = 'Signed in! Closing this page...';
+    // Close the options tab after a brief delay so the user sees success
+    setTimeout(() => { window.close(); }, 800);
   } catch (e) {
     statusEl.className = 'status-message error';
     statusEl.textContent = e.message === 'The user did not approve access.'

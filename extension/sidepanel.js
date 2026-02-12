@@ -97,8 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Retry auth check — Supabase async storage adapter may not be ready yet
   setTimeout(async () => {
-    const currentStatus = statusText.textContent;
-    if (currentStatus === 'Sign in required') {
+    if (statusBar.classList.contains('disconnected')) {
       await checkCloudStatusAndUpdateUI();
       updateLibraryLink();
     }
@@ -257,6 +256,11 @@ function setupTabs() {
 
       tab.classList.add('active');
       document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+
+      // Re-populate URL and title when switching to URL tab
+      if (tab.dataset.tab === 'url') {
+        autoPopulateUrl();
+      }
     });
   });
 }
@@ -368,7 +372,10 @@ async function transcribeFile(file) {
     currentResult = result;
 
     if (result.language) currentMetadata.language = result.language;
-    if (result.duration) currentMetadata.duration_seconds = result.duration;
+    if (result.duration) {
+      currentMetadata.duration_seconds = result.duration;
+      currentMetadata.duration_display = formatDuration(result.duration);
+    }
 
     await chrome.storage.local.set({
       transcriptResult: currentResult,
@@ -424,7 +431,10 @@ async function transcribeUrl(url) {
     // API title overrides detected title if present
     if (result.title) currentMetadata.title = result.title;
     if (result.language) currentMetadata.language = result.language;
-    if (result.duration) currentMetadata.duration_seconds = result.duration;
+    if (result.duration) {
+      currentMetadata.duration_seconds = result.duration;
+      currentMetadata.duration_display = formatDuration(result.duration);
+    }
 
     await chrome.storage.local.set({
       transcriptResult: currentResult,
@@ -519,7 +529,7 @@ async function startRecording() {
 
   } catch (e) {
     if (e.message.includes('activeTab') || e.message.includes('not been invoked')) {
-      showError('Cannot record this page. Navigate to a website with audio and try again.');
+      showError('Recording permission expired. Click the Voxly icon on your toolbar to refresh, then try recording again.');
     } else {
       showError(`Recording failed: ${e.message}`);
     }
@@ -660,11 +670,13 @@ async function stopRealtimeSession() {
       }))
     };
 
+    const rtDuration = recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null;
     currentMetadata = {
       source: 'Tab Recording (Real-time)',
       source_type: 'recording',
       extraction_method: 'cloud',
-      duration_seconds: recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null,
+      duration_seconds: rtDuration,
+      duration_display: rtDuration ? formatDuration(rtDuration) : null,
       processed_at: new Date().toISOString()
     };
 
@@ -733,6 +745,7 @@ async function transcribeRecording(blob) {
     source_type: 'recording',
     extraction_method: 'cloud',
     duration_seconds: recordingDuration,
+    duration_display: recordingDuration ? formatDuration(recordingDuration) : null,
     processed_at: new Date().toISOString()
   };
 
@@ -759,6 +772,18 @@ async function transcribeRecording(blob) {
     hideProgress();
     showError(`Transcription failed: ${e.message}`);
   }
+}
+
+// Format seconds into human-readable duration (e.g. "5:23" or "1:02:15")
+function formatDuration(seconds) {
+  const s = Math.round(seconds);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 // UI helpers

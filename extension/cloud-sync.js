@@ -4,11 +4,26 @@
 
 // Upload a transcript to Supabase cloud storage
 async function syncTranscriptToCloud(result, metadata) {
-  if (!await isCloudAuthenticated()) return null;
+  const authenticated = await isCloudAuthenticated();
+  if (!authenticated) {
+    console.warn('[Voxly] Cloud sync skipped: not authenticated');
+    return null;
+  }
 
   const sb = getSupabase();
   const user = await getCloudUser();
-  if (!user) return null;
+  if (!user) {
+    console.warn('[Voxly] Cloud sync skipped: no user');
+    return null;
+  }
+
+  // Ensure full_text is a non-null string (column is NOT NULL)
+  const fullText = result.full_text || '';
+
+  // duration_seconds must be integer or null
+  const durationSeconds = metadata.duration_seconds
+    ? Math.round(metadata.duration_seconds)
+    : null;
 
   const row = {
     user_id: user.id,
@@ -16,13 +31,13 @@ async function syncTranscriptToCloud(result, metadata) {
     source: metadata.source || null,
     source_type: metadata.source_type || null,
     uploader: metadata.uploader || null,
-    duration_seconds: metadata.duration_seconds || null,
-    duration_display: metadata.duration || null,
+    duration_seconds: durationSeconds,
+    duration_display: metadata.duration_display || null,
     language: metadata.language || 'en',
     model: metadata.model || null,
-    word_count: result.full_text ? result.full_text.split(/\s+/).length : 0,
+    word_count: fullText ? fullText.split(/\s+/).length : 0,
     extraction_method: metadata.extraction_method || 'cloud',
-    full_text: result.full_text,
+    full_text: fullText,
     segments: result.segments || [],
     speakers: result.speakers || [],
     diarization_status: result.diarization_status || null,
@@ -30,12 +45,17 @@ async function syncTranscriptToCloud(result, metadata) {
     processed_at: metadata.processed_at || new Date().toISOString()
   };
 
+  console.log('[Voxly] Syncing transcript to cloud, user:', user.id, 'title:', row.title);
   const { data, error } = await sb.from('transcripts').insert(row).select('id').single();
 
-  if (error) throw error;
+  if (error) {
+    console.error('[Voxly] Cloud sync INSERT error:', error.message, error.details, error.hint);
+    throw error;
+  }
 
   // Store the cloud transcript ID locally for linking
   await chrome.storage.local.set({ currentCloudTranscriptId: data.id });
+  console.log('[Voxly] Transcript synced to cloud:', data.id);
   return data.id;
 }
 
@@ -50,12 +70,9 @@ async function updateCloudTranscript(transcriptId, updates) {
 async function trySyncOrQueue(result, metadata) {
   try {
     const id = await syncTranscriptToCloud(result, metadata);
-    if (id) {
-      console.log('[Voxly] Transcript synced to cloud:', id);
-    }
     return id;
   } catch (e) {
-    console.log('[Voxly] Cloud sync failed, queuing for retry:', e.message);
+    console.error('[Voxly] Cloud sync failed, queuing for retry:', e.message, e);
     await addToSyncQueue(result, metadata);
     return null;
   }
