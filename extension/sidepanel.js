@@ -580,8 +580,17 @@ async function startRealtimeSession(tabStream, micStream) {
   const { key } = await transcriptionService.getRealtimeToken();
   console.log('[Voxly] Got realtime token');
 
-  // Open WebSocket to Deepgram and wait for it to connect
-  const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=16000`;
+  // Create AudioContext at default sample rate (avoids Chrome resampling issues)
+  realtimeAudioContext = new AudioContext();
+  if (realtimeAudioContext.state === 'suspended') {
+    console.log('[Voxly] AudioContext suspended, resuming...');
+    await realtimeAudioContext.resume();
+  }
+  const sampleRate = realtimeAudioContext.sampleRate;
+  console.log('[Voxly] AudioContext state:', realtimeAudioContext.state, 'sampleRate:', sampleRate);
+
+  // Open WebSocket to Deepgram with actual sample rate
+  const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=${sampleRate}`;
   realtimeSocket = new WebSocket(wsUrl, ['token', key]);
 
   realtimeSegments = [];
@@ -626,15 +635,6 @@ async function startRealtimeSession(tabStream, micStream) {
   realtimeSocket.onclose = (event) => {
     console.log(`[Voxly] Deepgram WebSocket closed — code: ${event.code}, reason: "${event.reason}"`);
   };
-
-  // Create AudioContext at 16kHz for PCM conversion
-  realtimeAudioContext = new AudioContext({ sampleRate: 16000 });
-  // Resume AudioContext — may be suspended after the tab-share picker dialog
-  if (realtimeAudioContext.state === 'suspended') {
-    console.log('[Voxly] AudioContext suspended, resuming...');
-    await realtimeAudioContext.resume();
-  }
-  console.log('[Voxly] AudioContext state:', realtimeAudioContext.state);
 
   // Mix tab audio + microphone via a GainNode bus
   const mixer = realtimeAudioContext.createGain();
