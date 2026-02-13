@@ -1,24 +1,23 @@
 // Voxly - Offscreen Audio Capture
-// Handles tab audio capture and Deepgram WebSocket streaming in an offscreen
-// document. Required because Chrome side panels cannot properly receive
-// getDisplayMedia/tabCapture audio data (delivers silence).
+// Captures tab audio via MediaRecorder and streams WebM/Opus chunks to
+// Deepgram WebSocket. Uses MediaRecorder instead of Web Audio API
+// (ScriptProcessor/AudioWorklet) to avoid audio routing issues in
+// offscreen documents.
 
 const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
 
-let audioContext = null;
-let processor = null;
+let mediaRecorder = null;
 let socket = null;
 let segments = [];
 let tabStream = null;
 
-// Relay logs to background/sidepanel so they're visible in the SW console
-// (offscreen document has its own invisible console)
+// Relay logs to background/sidepanel console
 function log(msg) {
   console.log(msg);
   chrome.runtime.sendMessage({ action: 'offscreenLog', msg }).catch(() => {});
 }
 
-// Signal to background that we're loaded and ready to receive messages
+// Signal ready
 chrome.runtime.sendMessage({ action: 'offscreenReady' });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -43,7 +42,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function startCapture(streamId, deepgramKey) {
-  // Get tab audio using stream ID from background
+  // Get tab audio stream using stream ID from background
   tabStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       mandatory: {
@@ -53,18 +52,10 @@ async function startCapture(streamId, deepgramKey) {
     }
   });
   const audioTracks = tabStream.getAudioTracks();
-  log(`[Voxly Offscreen] Got tab audio stream — ${audioTracks.length} audio tracks, enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
+  log(`[Voxly Offscreen] Got stream — ${audioTracks.length} audio tracks, enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
 
-  // Create AudioContext at default sample rate
-  audioContext = new AudioContext();
-  if (audioContext.state === 'suspended') {
-    await audioContext.resume();
-  }
-  const sampleRate = audioContext.sampleRate;
-  log(`[Voxly Offscreen] AudioContext sampleRate=${sampleRate} state=${audioContext.state}`);
-
-  // Open WebSocket to Deepgram
-  const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=${sampleRate}`;
+  // Connect to Deepgram WebSocket — no encoding params, Deepgram auto-detects WebM/Opus
+  const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true`;
   socket = new WebSocket(wsUrl, ['token', deepgramKey]);
   segments = [];
 
@@ -81,14 +72,12 @@ async function startCapture(streamId, deepgramKey) {
     };
   });
 
-  // Log ALL Deepgram messages for diagnostics
+  // Handle Deepgram responses
   socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
-
-    // Log every message type
     if (data.type === 'Results') {
       const transcript = data.channel?.alternatives?.[0]?.transcript || '';
-      log(`[Voxly Offscreen] Deepgram Result: is_final=${data.is_final} speech_final=${data.speech_final} text="${transcript.substring(0, 80)}"`);
+      log(`[Voxly Offscreen] Result: is_final=${data.is_final} text="${transcript.substring(0, 80)}"`);
 
       if (transcript && data.is_final) {
         const segment = {
@@ -111,77 +100,57 @@ async function startCapture(streamId, deepgramKey) {
         }).catch(() => {});
       }
     } else {
-      // Log Metadata, UtteranceEnd, etc.
       log(`[Voxly Offscreen] Deepgram msg type=${data.type}`);
     }
   };
 
-  socket.onerror = (e) => {
-    log('[Voxly Offscreen] WebSocket error');
-  };
+  socket.onerror = () => log('[Voxly Offscreen] WebSocket error');
+  socket.onclose = (event) => log(`[Voxly Offscreen] WebSocket closed — code=${event.code}`);
 
-  socket.onclose = (event) => {
-    log(`[Voxly Offscreen] WebSocket closed — code=${event.code} reason="${event.reason}"`);
-  };
+  // Use MediaRecorder to capture audio — bypasses Web Audio API entirely.
+  // Sends WebM/Opus chunks directly to Deepgram every 250ms.
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : 'audio/webm';
+  log(`[Voxly Offscreen] MediaRecorder mimeType: ${mimeType}`);
 
-  // Audio pipeline: MediaStreamSource → GainNode → ScriptProcessor → WebSocket
-  const mixer = audioContext.createGain();
-  mixer.gain.value = 1.0;
+  mediaRecorder = new MediaRecorder(tabStream, { mimeType });
 
-  const tabSource = audioContext.createMediaStreamSource(tabStream);
-  tabSource.connect(mixer);
-
-  processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-  let frameCount = 0;
-  processor.onaudioprocess = (e) => {
-    if (socket?.readyState === WebSocket.OPEN) {
-      const float32 = e.inputBuffer.getChannelData(0);
-
-      // Log amplitude for first 5 frames and every 100th frame — relayed to SW console
-      if (frameCount < 5 || frameCount % 100 === 0) {
-        let maxAmp = 0;
-        for (let i = 0; i < float32.length; i++) {
-          const abs = Math.abs(float32[i]);
-          if (abs > maxAmp) maxAmp = abs;
-        }
-        log(`[Voxly Offscreen] Frame ${frameCount}: maxAmp=${maxAmp.toFixed(6)}${maxAmp < 0.001 ? ' SILENCE' : ' OK'}`);
+  let chunkCount = 0;
+  mediaRecorder.ondataavailable = async (event) => {
+    if (event.data.size > 0 && socket?.readyState === WebSocket.OPEN) {
+      const buffer = await event.data.arrayBuffer();
+      socket.send(buffer);
+      if (chunkCount < 5 || chunkCount % 20 === 0) {
+        log(`[Voxly Offscreen] Chunk ${chunkCount}: ${buffer.byteLength} bytes`);
       }
-
-      // Convert float32 to int16 PCM
-      const int16 = new Int16Array(float32.length);
-      for (let i = 0; i < float32.length; i++) {
-        const s = Math.max(-1, Math.min(1, float32[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      socket.send(int16.buffer);
-      frameCount++;
+      chunkCount++;
     }
   };
 
-  mixer.connect(processor);
-  processor.connect(audioContext.destination);
+  mediaRecorder.onerror = (e) => log(`[Voxly Offscreen] MediaRecorder error: ${e.error?.message || e}`);
 
-  log('[Voxly Offscreen] Audio pipeline started');
+  mediaRecorder.start(250); // 250ms chunks for near-real-time
+  log('[Voxly Offscreen] MediaRecorder started — streaming to Deepgram');
 }
 
 async function stopCapture() {
-  if (processor) {
-    processor.disconnect();
-    processor = null;
+  // Stop MediaRecorder
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    // Wait for final ondataavailable to fire
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
-  if (audioContext) {
-    audioContext.close();
-    audioContext = null;
-  }
+  mediaRecorder = null;
+
   if (tabStream) {
     tabStream.getTracks().forEach(t => t.stop());
     tabStream = null;
   }
 
-  // Signal end of audio to Deepgram and wait for final results
+  // Signal end and wait for final Deepgram results
   if (socket?.readyState === WebSocket.OPEN) {
-    socket.send(new ArrayBuffer(0));
+    socket.send(new ArrayBuffer(0)); // Close signal
     await new Promise(resolve => setTimeout(resolve, 1500));
     socket.close();
   }
