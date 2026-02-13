@@ -20,6 +20,7 @@ let realtimeAudioContext = null;
 let realtimeProcessor = null;
 let realtimeSegments = [];
 let realtimeMicStream = null;
+let realtimeDisplayStream = null; // Original getDisplayMedia stream (keeps video tracks alive)
 
 // DOM Elements
 const statusBar = document.getElementById('statusBar');
@@ -483,21 +484,28 @@ async function transcribeUrl(url) {
 // Obtain an audio stream from the current tab.
 // Tries chrome.tabCapture first (seamless), falls back to getDisplayMedia (shows picker).
 async function getTabAudioStream() {
-  // Method 1: chrome.tabCapture — works when extension was recently activated
-  try {
-    const streamId = await chrome.tabCapture.getMediaStreamId({});
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: streamId
+  // Get the active tab for targeted capture
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  // Method 1: chrome.tabCapture with explicit targetTabId
+  if (activeTab?.id && !activeTab.url?.startsWith('chrome://') && !activeTab.url?.startsWith('chrome-extension://')) {
+    try {
+      const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: activeTab.id });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: streamId
+          }
         }
-      }
-    });
-    console.log('[Voxly] Tab capture succeeded (tabCapture API)');
-    return stream;
-  } catch (e) {
-    console.log('[Voxly] tabCapture failed, trying getDisplayMedia:', e.message);
+      });
+      console.log('[Voxly] Tab capture succeeded (tabCapture API, tab:', activeTab.title?.substring(0, 40), ')');
+      return stream;
+    } catch (e) {
+      console.log('[Voxly] tabCapture failed, trying getDisplayMedia:', e.message);
+    }
+  } else {
+    console.log('[Voxly] Active tab is chrome page, skipping tabCapture');
   }
 
   // Method 2: getDisplayMedia — always works, shows Chrome's share dialog
@@ -507,16 +515,24 @@ async function getTabAudioStream() {
     preferCurrentTab: true
   });
 
-  // Discard video tracks — we only need the audio
-  stream.getVideoTracks().forEach(track => track.stop());
+  // IMPORTANT: Do NOT stop video tracks — Chrome may kill audio capture if
+  // video tracks are stopped from a getDisplayMedia session. Instead, extract
+  // only the audio tracks into a new stream for our use.
+  const audioTracks = stream.getAudioTracks();
 
-  if (stream.getAudioTracks().length === 0) {
+  if (audioTracks.length === 0) {
     stream.getTracks().forEach(track => track.stop());
     throw new Error('No audio captured. Make sure "Also share tab audio" is checked in the share dialog.');
   }
 
-  console.log('[Voxly] Tab capture succeeded (getDisplayMedia fallback)');
-  return stream;
+  // Keep reference to original stream so video tracks stay alive during recording
+  // (stopping video tracks can kill Chrome's capture session and silence audio)
+  realtimeDisplayStream = stream;
+
+  // Return audio-only stream for processing
+  const audioStream = new MediaStream(audioTracks);
+  console.log('[Voxly] Tab capture succeeded (getDisplayMedia fallback, audio tracks:', audioTracks.length, 'video tracks kept alive:', stream.getVideoTracks().length, ')');
+  return audioStream;
 }
 
 // Start recording tab audio
@@ -656,6 +672,17 @@ async function startRealtimeSession(tabStream, micStream) {
   realtimeProcessor.onaudioprocess = (e) => {
     if (realtimeSocket?.readyState === WebSocket.OPEN) {
       const float32 = e.inputBuffer.getChannelData(0);
+
+      // Monitor audio levels (first 10 frames + every 100th)
+      if (audioFramesSent < 10 || audioFramesSent % 100 === 0) {
+        let maxAmp = 0;
+        for (let i = 0; i < float32.length; i++) {
+          const abs = Math.abs(float32[i]);
+          if (abs > maxAmp) maxAmp = abs;
+        }
+        console.log(`[Voxly] Audio frame ${audioFramesSent}: maxAmplitude=${maxAmp.toFixed(6)}${maxAmp < 0.001 ? ' ⚠️ SILENCE' : ''}`);
+      }
+
       // Convert float32 to int16 PCM
       const int16 = new Int16Array(float32.length);
       for (let i = 0; i < float32.length; i++) {
@@ -726,6 +753,11 @@ async function stopRealtimeSession() {
   if (realtimeMicStream) {
     realtimeMicStream.getTracks().forEach(track => track.stop());
     realtimeMicStream = null;
+  }
+  // Clean up the original getDisplayMedia stream (video tracks kept alive during recording)
+  if (realtimeDisplayStream) {
+    realtimeDisplayStream.getTracks().forEach(track => track.stop());
+    realtimeDisplayStream = null;
   }
 
   // Signal end of audio to Deepgram
