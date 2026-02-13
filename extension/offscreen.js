@@ -11,6 +11,13 @@ let socket = null;
 let segments = [];
 let tabStream = null;
 
+// Relay logs to background/sidepanel so they're visible in the SW console
+// (offscreen document has its own invisible console)
+function log(msg) {
+  console.log(msg);
+  chrome.runtime.sendMessage({ action: 'offscreenLog', msg }).catch(() => {});
+}
+
 // Signal to background that we're loaded and ready to receive messages
 chrome.runtime.sendMessage({ action: 'offscreenReady' });
 
@@ -20,7 +27,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'startCapture') {
     startCapture(message.streamId, message.deepgramKey)
       .then(() => sendResponse({ ok: true }))
-      .catch(e => sendResponse({ error: e.message }));
+      .catch(e => {
+        log('[Voxly Offscreen] startCapture ERROR: ' + e.message);
+        sendResponse({ error: e.message });
+      });
     return true;
   }
 
@@ -33,9 +43,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function startCapture(streamId, deepgramKey) {
-  // Get tab audio using stream ID cached by background when user clicked the icon.
-  // getUserMedia with chromeMediaSource:'tab' works in offscreen documents and
-  // delivers real audio (unlike side panels which deliver silence).
+  // Get tab audio using stream ID from background
   tabStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       mandatory: {
@@ -44,17 +52,18 @@ async function startCapture(streamId, deepgramKey) {
       }
     }
   });
-  console.log('[Voxly Offscreen] Got tab audio stream, tracks:', tabStream.getAudioTracks().length);
+  const audioTracks = tabStream.getAudioTracks();
+  log(`[Voxly Offscreen] Got tab audio stream — ${audioTracks.length} audio tracks, enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
 
-  // Create AudioContext at default sample rate (avoids resampling issues)
+  // Create AudioContext at default sample rate
   audioContext = new AudioContext();
   if (audioContext.state === 'suspended') {
     await audioContext.resume();
   }
   const sampleRate = audioContext.sampleRate;
-  console.log('[Voxly Offscreen] AudioContext sampleRate:', sampleRate, 'state:', audioContext.state);
+  log(`[Voxly Offscreen] AudioContext sampleRate=${sampleRate} state=${audioContext.state}`);
 
-  // Open WebSocket to Deepgram and wait for connection
+  // Open WebSocket to Deepgram
   const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=${sampleRate}`;
   socket = new WebSocket(wsUrl, ['token', deepgramKey]);
   segments = [];
@@ -63,7 +72,7 @@ async function startCapture(streamId, deepgramKey) {
     const timeout = setTimeout(() => reject(new Error('Deepgram WebSocket timed out')), 10000);
     socket.onopen = () => {
       clearTimeout(timeout);
-      console.log('[Voxly Offscreen] Deepgram WebSocket connected');
+      log('[Voxly Offscreen] Deepgram WebSocket connected');
       resolve();
     };
     socket.onerror = () => {
@@ -72,10 +81,15 @@ async function startCapture(streamId, deepgramKey) {
     };
   });
 
+  // Log ALL Deepgram messages for diagnostics
   socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
+
+    // Log every message type
     if (data.type === 'Results') {
-      const transcript = data.channel?.alternatives?.[0]?.transcript;
+      const transcript = data.channel?.alternatives?.[0]?.transcript || '';
+      log(`[Voxly Offscreen] Deepgram Result: is_final=${data.is_final} speech_final=${data.speech_final} text="${transcript.substring(0, 80)}"`);
+
       if (transcript && data.is_final) {
         const segment = {
           text: transcript,
@@ -83,32 +97,34 @@ async function startCapture(streamId, deepgramKey) {
           end: data.start + data.duration
         };
         segments.push(segment);
-        // Send to side panel
         chrome.runtime.sendMessage({
           target: 'sidepanel',
           action: 'realtimeSegment',
           segment,
           allSegments: segments
-        });
+        }).catch(() => {});
       } else if (transcript) {
         chrome.runtime.sendMessage({
           target: 'sidepanel',
           action: 'realtimeInterim',
           text: transcript
-        });
+        }).catch(() => {});
       }
+    } else {
+      // Log Metadata, UtteranceEnd, etc.
+      log(`[Voxly Offscreen] Deepgram msg type=${data.type}`);
     }
   };
 
   socket.onerror = (e) => {
-    console.error('[Voxly Offscreen] WebSocket error:', e);
+    log('[Voxly Offscreen] WebSocket error');
   };
 
   socket.onclose = (event) => {
-    console.log(`[Voxly Offscreen] WebSocket closed — code: ${event.code}, reason: "${event.reason}"`);
+    log(`[Voxly Offscreen] WebSocket closed — code=${event.code} reason="${event.reason}"`);
   };
 
-  // Set up audio pipeline: MediaStreamSource → GainNode → ScriptProcessor → WebSocket
+  // Audio pipeline: MediaStreamSource → GainNode → ScriptProcessor → WebSocket
   const mixer = audioContext.createGain();
   mixer.gain.value = 1.0;
 
@@ -122,14 +138,14 @@ async function startCapture(streamId, deepgramKey) {
     if (socket?.readyState === WebSocket.OPEN) {
       const float32 = e.inputBuffer.getChannelData(0);
 
-      // Monitor amplitude
-      if (frameCount < 5 || frameCount % 200 === 0) {
+      // Log amplitude for first 5 frames and every 100th frame — relayed to SW console
+      if (frameCount < 5 || frameCount % 100 === 0) {
         let maxAmp = 0;
         for (let i = 0; i < float32.length; i++) {
           const abs = Math.abs(float32[i]);
           if (abs > maxAmp) maxAmp = abs;
         }
-        console.log(`[Voxly Offscreen] Frame ${frameCount}: maxAmp=${maxAmp.toFixed(6)}${maxAmp < 0.001 ? ' ⚠️ SILENCE' : ' ✓'}`);
+        log(`[Voxly Offscreen] Frame ${frameCount}: maxAmp=${maxAmp.toFixed(6)}${maxAmp < 0.001 ? ' SILENCE' : ' OK'}`);
       }
 
       // Convert float32 to int16 PCM
@@ -146,11 +162,10 @@ async function startCapture(streamId, deepgramKey) {
   mixer.connect(processor);
   processor.connect(audioContext.destination);
 
-  console.log('[Voxly Offscreen] Audio pipeline started');
+  log('[Voxly Offscreen] Audio pipeline started');
 }
 
 async function stopCapture() {
-  // Stop audio processing
   if (processor) {
     processor.disconnect();
     processor = null;
@@ -172,7 +187,7 @@ async function stopCapture() {
   }
   socket = null;
 
-  console.log(`[Voxly Offscreen] Capture stopped — ${segments.length} segments`);
+  log(`[Voxly Offscreen] Capture stopped — ${segments.length} segments`);
 
   const result = { segments: [...segments] };
   segments = [];

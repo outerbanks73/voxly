@@ -69,6 +69,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // Relay logs from offscreen document to SW console
+  if (request.action === 'offscreenLog') {
+    console.log(request.msg);
+    return;
+  }
+
   // Start recording: create offscreen document and begin capture
   if (request.action === 'startTabCapture') {
     handleStartTabCapture(request.deepgramKey)
