@@ -93,7 +93,10 @@ async function tryYouTubeCaptions(videoId: string): Promise<any | null> {
       })
       .filter((s: any) => s.text.length > 0)
 
-    if (segments.length === 0) return null
+    if (segments.length === 0) {
+      console.log(`[cascade] YouTube captions: parsed 0 segments for ${videoId}`)
+      return null
+    }
 
     const fullText = segments.map((s: any) => s.text).join(' ')
     const lastSeg = segments[segments.length - 1]
@@ -101,6 +104,7 @@ async function tryYouTubeCaptions(videoId: string): Promise<any | null> {
     // Extract video title from player response
     const title = playerResponse?.videoDetails?.title || null
     const language = track.languageCode || null
+    console.log(`[cascade] YouTube captions: ${segments.length} segments, lang=${language}, title=${title?.substring(0, 50)}`)
 
     return {
       full_text: fullText,
@@ -125,17 +129,31 @@ async function trySupadata(url: string): Promise<any | null> {
       headers: { 'x-api-key': SUPADATA_API_KEY }
     })
 
-    if (!supadataResponse.ok) return null
+    if (!supadataResponse.ok) {
+      console.log(`[cascade] Supadata HTTP ${supadataResponse.status} for ${url}`)
+      return null
+    }
 
     const supadataResult = await supadataResponse.json()
+    console.log(`[cascade] Supadata response keys: ${Object.keys(supadataResult).join(', ')}`,
+      supadataResult.content ? `content_length: ${supadataResult.content.length}` : 'no content',
+      supadataResult.jobId ? `jobId: ${supadataResult.jobId}` : '',
+      supadataResult.error ? `error: ${supadataResult.error}` : '')
 
     // Async job — return the jobId wrapper so the main handler can forward it
     if (supadataResult.jobId) {
       return { _async: true, jobId: supadataResult.jobId }
     }
 
+    // Empty or error response from Supadata — treat as failure
+    if (!supadataResult.content || supadataResult.content.length === 0) {
+      console.log(`[cascade] Supadata returned empty content for ${url}`)
+      return null
+    }
+
     return normalizeSupadataResult(supadataResult)
-  } catch (_e) {
+  } catch (e) {
+    console.log(`[cascade] Supadata exception: ${e.message}`)
     return null
   }
 }
@@ -156,11 +174,24 @@ async function tryDeepgramUrl(url: string): Promise<any | null> {
       }
     )
 
-    if (!dgResponse.ok) return null
+    if (!dgResponse.ok) {
+      console.log(`[cascade] Deepgram HTTP ${dgResponse.status} for ${url}`)
+      return null
+    }
 
     const dgResult = await dgResponse.json()
+    const transcript = dgResult.results?.channels?.[0]?.alternatives?.[0]?.transcript
+    console.log(`[cascade] Deepgram result: transcript_length=${transcript?.length || 0}, utterances=${dgResult.results?.utterances?.length || 0}`)
+
+    // Empty transcript — treat as failure
+    if (!transcript || transcript.trim().length === 0) {
+      console.log(`[cascade] Deepgram returned empty transcript for ${url}`)
+      return null
+    }
+
     return normalizeDeepgramResult(dgResult)
-  } catch (_e) {
+  } catch (e) {
+    console.log(`[cascade] Deepgram exception: ${e.message}`)
     return null
   }
 }
@@ -334,6 +365,7 @@ Deno.serve(async (req) => {
 
     // --- Cascade ---
     const platform = classifyUrl(url)
+    console.log(`[cascade] URL: ${url} → platform: ${platform}`)
     let result: any = null
     const steps: string[] = []
 
@@ -383,6 +415,7 @@ Deno.serve(async (req) => {
     // Add cascade metadata to result
     const method = steps.find(s => s.includes(':success'))?.split(':')[0]
     result.metadata = { method, cascade_steps: steps }
+    console.log(`[cascade] SUCCESS: method=${method}, steps=${steps.join(' → ')}, segments=${result.segments?.length || 0}`)
 
     // Increment usage
     await incrementUsage(supabase, user.id)
