@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== 'offscreen') return;
 
   if (message.action === 'startCapture') {
-    startCapture(message.deepgramKey)
+    startCapture(message.streamId, message.deepgramKey)
       .then(() => sendResponse({ ok: true }))
       .catch(e => sendResponse({ error: e.message }));
     return true;
@@ -32,15 +32,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function startCapture(deepgramKey) {
-  // Use getDisplayMedia to capture tab audio — Chrome shows a tab picker.
-  // This avoids tabCapture.getMediaStreamId() which requires activeTab invocation
-  // that expires in side panel contexts.
-  tabStream = await navigator.mediaDevices.getDisplayMedia({
-    audio: true,
-    video: true // Required by getDisplayMedia spec; we only use the audio track
+async function startCapture(streamId, deepgramKey) {
+  // Get tab audio using stream ID cached by background when user clicked the icon.
+  // getUserMedia with chromeMediaSource:'tab' works in offscreen documents and
+  // delivers real audio (unlike side panels which deliver silence).
+  tabStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      mandatory: {
+        chromeMediaSource: 'tab',
+        chromeMediaSourceId: streamId
+      }
+    }
   });
-  console.log('[Voxly Offscreen] Got display media stream, audio tracks:', tabStream.getAudioTracks().length);
+  console.log('[Voxly Offscreen] Got tab audio stream, tracks:', tabStream.getAudioTracks().length);
 
   // Create AudioContext at default sample rate (avoids resampling issues)
   audioContext = new AudioContext();

@@ -32,8 +32,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.tabs.create({ url: 'options.html' });
   }
 
-  // Enable side panel to open on action click
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // Don't auto-open panel on click — we handle it in onClicked to cache stream ID
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
 
   // Set up cloud session refresh alarm (every 55 min, tokens expire at 60)
   chrome.alarms.create('refreshCloudSession', { periodInMinutes: 55 });
@@ -42,9 +42,22 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.alarms.create('retrySyncQueue', { periodInMinutes: 5 });
 });
 
-// Open side panel when extension icon is clicked
+// When user clicks the extension icon: open side panel AND cache a tab capture
+// stream ID while activeTab permission is fresh. The stream ID is used later
+// when the user clicks Start Recording.
 chrome.action.onClicked.addListener(async (tab) => {
-  await chrome.sidePanel.open({ tabId: tab.id });
+  // Open side panel immediately for responsive UX
+  chrome.sidePanel.open({ tabId: tab.id });
+
+  // Cache stream ID while activeTab is fresh (granted by icon click)
+  try {
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+    await chrome.storage.local.set({ cachedStreamId: streamId });
+    console.log('[Voxly BG] Cached stream ID for tab:', tab.id);
+  } catch (e) {
+    console.warn('[Voxly BG] Could not cache stream ID:', e.message);
+    // Panel still opens — user just won't be able to record this tab
+  }
 });
 
 // Handle messages
@@ -73,19 +86,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Start capture via offscreen document using getDisplayMedia
-// tabCapture.getMediaStreamId() requires activeTab invocation which expires
-// in side panels. getDisplayMedia in offscreen document shows Chrome's tab
-// picker and works without activeTab.
+// Start capture using cached stream ID from icon click.
+// activeTab is granted when the user clicks the extension icon — we cache the
+// stream ID then. The offscreen document uses it with getUserMedia.
 async function handleStartTabCapture(deepgramKey) {
   console.log('[Voxly BG] Starting capture via offscreen document');
+
+  // Get cached stream ID from when user clicked the extension icon
+  const { cachedStreamId } = await chrome.storage.local.get('cachedStreamId');
+  if (!cachedStreamId) {
+    throw new Error('No tab audio access. Click the Voxly icon on the tab you want to record, then try again.');
+  }
+
+  // Clear it — stream IDs are single-use
+  await chrome.storage.local.remove('cachedStreamId');
+  console.log('[Voxly BG] Using cached stream ID');
 
   // Create offscreen document if needed, and wait for it to load
   const existingContexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT']
   });
   if (existingContexts.length === 0) {
-    // Set up listener for ready signal BEFORE creating the document
     const readyPromise = new Promise((resolve) => {
       const onReady = (msg) => {
         if (msg.action === 'offscreenReady') {
@@ -94,13 +115,12 @@ async function handleStartTabCapture(deepgramKey) {
         }
       };
       chrome.runtime.onMessage.addListener(onReady);
-      // Fallback timeout in case ready signal is missed
-      setTimeout(resolve, 3000);
+      setTimeout(resolve, 3000); // Fallback timeout
     });
 
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
-      reasons: ['DISPLAY_MEDIA'],
+      reasons: ['USER_MEDIA'],
       justification: 'Tab audio capture for real-time transcription'
     });
     console.log('[Voxly BG] Created offscreen document, waiting for ready...');
@@ -108,14 +128,15 @@ async function handleStartTabCapture(deepgramKey) {
     console.log('[Voxly BG] Offscreen document ready');
   }
 
-  // Send capture command — offscreen doc will call getDisplayMedia
+  // Send capture command with stream ID
   const response = await chrome.runtime.sendMessage({
     target: 'offscreen',
     action: 'startCapture',
+    streamId: cachedStreamId,
     deepgramKey
   });
 
-  console.log('[Voxly BG] Offscreen startCapture response:', JSON.stringify(response));
+  console.log('[Voxly BG] Offscreen response:', JSON.stringify(response));
 
   if (!response) {
     throw new Error('Offscreen document did not respond. Please try again.');
