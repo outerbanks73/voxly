@@ -5,22 +5,13 @@ const extpay = ExtPay('voxly'); // TODO: Replace with your ExtensionPay extensio
 
 // State
 let selectedFile = null;
-let mediaRecorder = null;
-let recordedChunks = [];
 let recordingStartTime = null;
 let recordingTimer = null;
 let currentResult = null; // Store the result for export
 let currentMetadata = null; // Store metadata for enriched exports
 let isRealtimeMode = false;
 let detectedVideoTitle = null;
-
-// Realtime WebSocket state
-let realtimeSocket = null;
-let realtimeAudioContext = null;
-let realtimeProcessor = null;
 let realtimeSegments = [];
-let realtimeMicStream = null;
-let realtimeDisplayStream = null; // Original getDisplayMedia stream (keeps video tracks alive)
 
 // DOM Elements
 const statusBar = document.getElementById('statusBar');
@@ -94,6 +85,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       checkCloudStatusAndUpdateUI();
       updateLibraryLink();
       updateUsageIndicator();
+    }
+    // Real-time transcript updates from offscreen document
+    if (request.target === 'sidepanel' && request.action === 'realtimeSegment') {
+      realtimeSegments = request.allSegments;
+      updateRealtimeTranscript(realtimeSegments);
+    }
+    if (request.target === 'sidepanel' && request.action === 'realtimeInterim') {
+      updateRealtimeTranscriptInterim(request.text);
+    }
+    if (request.target === 'sidepanel' && request.action === 'captureError') {
+      showError(`Recording failed: ${request.error}`);
     }
   });
 
@@ -481,88 +483,40 @@ async function transcribeUrl(url) {
   }
 }
 
-// Obtain an audio stream from the current tab.
-// Tries chrome.tabCapture first (seamless), falls back to getDisplayMedia (shows picker).
-async function getTabAudioStream() {
-  // Get the active tab for targeted capture
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-  // Method 1: chrome.tabCapture with explicit targetTabId
-  if (activeTab?.id && !activeTab.url?.startsWith('chrome://') && !activeTab.url?.startsWith('chrome-extension://')) {
-    try {
-      const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: activeTab.id });
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          mandatory: {
-            chromeMediaSource: 'tab',
-            chromeMediaSourceId: streamId
-          }
-        }
-      });
-      console.log('[Voxly] Tab capture succeeded (tabCapture API, tab:', activeTab.title?.substring(0, 40), ')');
-      return stream;
-    } catch (e) {
-      console.log('[Voxly] tabCapture failed, trying getDisplayMedia:', e.message);
-    }
-  } else {
-    console.log('[Voxly] Active tab is chrome page, skipping tabCapture');
-  }
-
-  // Method 2: getDisplayMedia — always works, shows Chrome's share dialog
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    audio: true,
-    video: true,
-    preferCurrentTab: true
-  });
-
-  // IMPORTANT: Do NOT stop video tracks — Chrome may kill audio capture if
-  // video tracks are stopped from a getDisplayMedia session. Instead, extract
-  // only the audio tracks into a new stream for our use.
-  const audioTracks = stream.getAudioTracks();
-
-  if (audioTracks.length === 0) {
-    stream.getTracks().forEach(track => track.stop());
-    throw new Error('No audio captured. Make sure "Also share tab audio" is checked in the share dialog.');
-  }
-
-  // Keep reference to original stream so video tracks stay alive during recording
-  // (stopping video tracks can kill Chrome's capture session and silence audio)
-  realtimeDisplayStream = stream;
-
-  // Return audio-only stream for processing
-  const audioStream = new MediaStream(audioTracks);
-  console.log('[Voxly] Tab capture succeeded (getDisplayMedia fallback, audio tracks:', audioTracks.length, 'video tracks kept alive:', stream.getVideoTracks().length, ')');
-  return audioStream;
-}
-
-// Start recording tab audio
+// Start recording tab audio via offscreen document
+// Audio capture happens in an offscreen document because Chrome side panels
+// cannot properly receive tab audio (getDisplayMedia delivers silence).
 async function startRecording() {
   isRealtimeMode = true;
 
   try {
-    const tabStream = await getTabAudioStream();
-
-    // Request microphone for mixed recording (tab + mic)
-    let micStream = null;
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log('[Voxly] Microphone access granted — recording tab + mic audio');
-    } catch (micErr) {
-      console.warn('[Voxly] Microphone access denied — recording tab audio only:', micErr.message);
+    // Get the active tab
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) {
+      throw new Error('No active tab found. Navigate to the tab you want to record.');
+    }
+    if (activeTab.url?.startsWith('chrome://') || activeTab.url?.startsWith('chrome-extension://')) {
+      throw new Error('Cannot record Chrome internal pages. Navigate to the tab you want to record (e.g., Google Meet).');
     }
 
-    recordedChunks = [];
+    console.log('[Voxly] Starting recording for tab:', activeTab.title?.substring(0, 50));
 
-    // Real-time mode: stream to Deepgram WebSocket
-    try {
-      await startRealtimeSession(tabStream, micStream);
-    } catch (sessionErr) {
-      // Clean up streams if session fails
-      tabStream.getTracks().forEach(t => t.stop());
-      if (micStream) micStream.getTracks().forEach(t => t.stop());
-      throw new Error(`Real-time session failed: ${sessionErr.message}`);
+    // Get temporary Deepgram key
+    const { key } = await transcriptionService.getRealtimeToken();
+    console.log('[Voxly] Got realtime token');
+
+    // Start tab capture via background SW → offscreen document
+    const response = await chrome.runtime.sendMessage({
+      action: 'startTabCapture',
+      tabId: activeTab.id,
+      deepgramKey: key
+    });
+
+    if (response?.error) {
+      throw new Error(response.error);
     }
 
+    realtimeSegments = [];
     recordingStartTime = Date.now();
 
     // Update UI
@@ -588,128 +542,6 @@ async function startRecording() {
       showError(`Recording failed: ${e.message}`);
     }
   }
-}
-
-// Start real-time transcription session via Deepgram WebSocket
-async function startRealtimeSession(tabStream, micStream) {
-  // Get temporary Deepgram key from Edge Function
-  const { key } = await transcriptionService.getRealtimeToken();
-  console.log('[Voxly] Got realtime token');
-
-  // Create AudioContext at default sample rate (avoids Chrome resampling issues)
-  realtimeAudioContext = new AudioContext();
-  if (realtimeAudioContext.state === 'suspended') {
-    console.log('[Voxly] AudioContext suspended, resuming...');
-    await realtimeAudioContext.resume();
-  }
-  const sampleRate = realtimeAudioContext.sampleRate;
-  console.log('[Voxly] AudioContext state:', realtimeAudioContext.state, 'sampleRate:', sampleRate);
-
-  // Open WebSocket to Deepgram with actual sample rate
-  const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=${sampleRate}`;
-  realtimeSocket = new WebSocket(wsUrl, ['token', key]);
-
-  realtimeSegments = [];
-
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Deepgram WebSocket connection timed out')), 10000);
-    realtimeSocket.onopen = () => {
-      clearTimeout(timeout);
-      console.log('[Voxly] Deepgram WebSocket connected');
-      resolve();
-    };
-    realtimeSocket.onerror = (e) => {
-      clearTimeout(timeout);
-      console.error('[Voxly] Deepgram WebSocket error:', e);
-      reject(new Error('Deepgram WebSocket connection failed'));
-    };
-  });
-
-  realtimeSocket.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    console.log(`[Voxly] Deepgram message: type=${data.type}`, data.type !== 'Results' ? JSON.stringify(data).substring(0, 200) : '');
-    if (data.type === 'Results') {
-      const transcript = data.channel?.alternatives?.[0]?.transcript;
-      if (transcript && data.is_final) {
-        realtimeSegments.push({
-          text: transcript,
-          start: data.start,
-          end: data.start + data.duration
-        });
-        updateRealtimeTranscript(realtimeSegments);
-      } else if (transcript) {
-        // Interim result — show it as pending
-        updateRealtimeTranscriptInterim(transcript);
-      }
-    }
-  };
-
-  realtimeSocket.onerror = (e) => {
-    console.error('[Voxly] Deepgram WebSocket error:', e);
-  };
-
-  realtimeSocket.onclose = (event) => {
-    console.log(`[Voxly] Deepgram WebSocket closed — code: ${event.code}, reason: "${event.reason}"`);
-  };
-
-  // Mix tab audio + microphone via a GainNode bus
-  const mixer = realtimeAudioContext.createGain();
-  mixer.gain.value = 1.0;
-
-  const tabSource = realtimeAudioContext.createMediaStreamSource(tabStream);
-  tabSource.connect(mixer);
-
-  if (micStream) {
-    realtimeMicStream = micStream;
-    const micSource = realtimeAudioContext.createMediaStreamSource(micStream);
-    micSource.connect(mixer);
-  }
-
-  // ScriptProcessor reads the mixed signal and sends PCM to Deepgram
-  realtimeProcessor = realtimeAudioContext.createScriptProcessor(4096, 1, 1);
-
-  let audioFramesSent = 0;
-  realtimeProcessor.onaudioprocess = (e) => {
-    if (realtimeSocket?.readyState === WebSocket.OPEN) {
-      const float32 = e.inputBuffer.getChannelData(0);
-
-      // Monitor audio levels (first 10 frames + every 100th)
-      if (audioFramesSent < 10 || audioFramesSent % 100 === 0) {
-        let maxAmp = 0;
-        for (let i = 0; i < float32.length; i++) {
-          const abs = Math.abs(float32[i]);
-          if (abs > maxAmp) maxAmp = abs;
-        }
-        console.log(`[Voxly] Audio frame ${audioFramesSent}: maxAmplitude=${maxAmp.toFixed(6)}${maxAmp < 0.001 ? ' ⚠️ SILENCE' : ''}`);
-      }
-
-      // Convert float32 to int16 PCM
-      const int16 = new Int16Array(float32.length);
-      for (let i = 0; i < float32.length; i++) {
-        const s = Math.max(-1, Math.min(1, float32[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      realtimeSocket.send(int16.buffer);
-      audioFramesSent++;
-      if (audioFramesSent === 1) {
-        console.log('[Voxly] First audio frame sent to Deepgram');
-      } else if (audioFramesSent % 100 === 0) {
-        console.log(`[Voxly] Audio frames sent: ${audioFramesSent}`);
-      }
-    }
-  };
-
-  mixer.connect(realtimeProcessor);
-  realtimeProcessor.connect(realtimeAudioContext.destination);
-
-  // Record the mixed stream for archival
-  const mixedDest = realtimeAudioContext.createMediaStreamDestination();
-  mixer.connect(mixedDest);
-  mediaRecorder = new MediaRecorder(mixedDest.stream, { mimeType: 'audio/webm' });
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) recordedChunks.push(e.data);
-  };
-  mediaRecorder.start(1000);
 }
 
 // Update real-time transcript display with final segments
@@ -739,41 +571,19 @@ function updateRealtimeTranscriptInterim(text) {
   container.scrollTop = container.scrollHeight;
 }
 
-// Stop real-time session
-async function stopRealtimeSession() {
-  // Stop sending audio
-  if (realtimeProcessor) {
-    realtimeProcessor.disconnect();
-    realtimeProcessor = null;
-  }
-  if (realtimeAudioContext) {
-    realtimeAudioContext.close();
-    realtimeAudioContext = null;
-  }
-  if (realtimeMicStream) {
-    realtimeMicStream.getTracks().forEach(track => track.stop());
-    realtimeMicStream = null;
-  }
-  // Clean up the original getDisplayMedia stream (video tracks kept alive during recording)
-  if (realtimeDisplayStream) {
-    realtimeDisplayStream.getTracks().forEach(track => track.stop());
-    realtimeDisplayStream = null;
+// Process final recording results from offscreen document
+async function processFinalRecording(finalSegments) {
+  // Merge any segments received via stopCapture response
+  if (finalSegments?.length > 0) {
+    realtimeSegments = finalSegments;
   }
 
-  // Signal end of audio to Deepgram
-  if (realtimeSocket?.readyState === WebSocket.OPEN) {
-    realtimeSocket.send(new ArrayBuffer(0));
-    // Wait briefly for final results
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    realtimeSocket.close();
-  }
-  realtimeSocket = null;
-
-  // Assemble final result from accumulated segments
   console.log(`[Voxly] Recording stopped — ${realtimeSegments.length} segments captured`);
+
   if (realtimeSegments.length === 0) {
     showError('No speech detected during recording. Make sure the tab is playing audio and try again.');
   }
+
   if (realtimeSegments.length > 0) {
     const fullText = realtimeSegments.map(s => s.text).join(' ');
     currentResult = {
@@ -793,7 +603,6 @@ async function stopRealtimeSession() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.title) {
-        // Clean up common suffixes like " - Google Chrome"
         recordingTitle = tab.title.replace(/\s*[-–—]\s*Google Chrome$/, '').trim() || 'Tab Recording';
       }
     } catch (_e) { /* fall back to default */ }
@@ -832,78 +641,25 @@ function formatTime(seconds) {
 
 // Stop recording
 async function stopRecording() {
-  // Stop MediaRecorder first
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-  // Then stop the realtime WebSocket session (must await for results to save)
-  await stopRealtimeSession();
-
   clearInterval(recordingTimer);
 
   document.getElementById('startRecordBtn').style.display = 'block';
   document.getElementById('stopRecordBtn').style.display = 'none';
   document.getElementById('recordingIndicator').classList.remove('active');
 
+  // Stop capture in offscreen document and get final segments
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'stopTabCapture' });
+    await processFinalRecording(response?.segments);
+  } catch (e) {
+    console.error('[Voxly] Stop recording error:', e);
+    await processFinalRecording(null);
+  }
+
   isRealtimeMode = false;
 }
 
 // Transcribe recording via cloud (Deepgram Nova-2)
-async function transcribeRecording(blob) {
-  if (!await checkUsageLimit()) return;
-
-  const authenticated = await isCloudAuthenticated();
-  if (!authenticated) {
-    showError('Please sign in to use cloud transcription. <a href="options.html" target="_blank" style="color:#0080FF;text-decoration:underline;">Open Settings to sign in</a>', true);
-    return;
-  }
-
-  hideError();
-  showProgress('Uploading recording...');
-
-  const recordingDuration = recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null;
-
-  currentMetadata = {
-    source: 'Tab Recording',
-    source_type: 'recording',
-    extraction_method: 'cloud',
-    duration_seconds: recordingDuration,
-    duration_display: recordingDuration ? formatDuration(recordingDuration) : null,
-    processed_at: new Date().toISOString()
-  };
-
-  try {
-    // Use the blob's actual MIME type (may be audio/webm, video/webm, etc.)
-    const blobType = blob.type || 'audio/webm';
-    const ext = blobType.includes('webm') ? 'webm' : blobType.includes('ogg') ? 'ogg' : 'webm';
-    const file = new File([blob], `recording.${ext}`, { type: blobType });
-    const result = await transcriptionService.transcribeFile(file, (progress) => {
-      updateProgress(progress);
-    });
-
-    hideProgress();
-    currentResult = result;
-
-    if (result.language) currentMetadata.language = result.language;
-
-    await chrome.storage.local.set({
-      transcriptResult: currentResult,
-      transcriptMetadata: currentMetadata
-    });
-
-    showResult(currentResult);
-    incrementUsage();
-    trySyncOrQueue(currentResult, currentMetadata);
-  } catch (e) {
-    hideProgress();
-    if (e.message.includes('quota exceeded')) {
-      showUpgradeModal();
-    } else {
-      showError(`Transcription failed: ${e.message}`);
-    }
-  }
-}
-
 // Format seconds into human-readable duration (e.g. "5:23" or "1:02:15")
 function formatDuration(seconds) {
   const s = Math.round(seconds);

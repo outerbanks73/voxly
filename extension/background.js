@@ -55,7 +55,90 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(() => sendResponse({ state: null }));
     return true;
   }
+
+  // Tab capture: get stream ID and start offscreen document
+  if (request.action === 'startTabCapture') {
+    handleStartTabCapture(request.tabId, request.deepgramKey)
+      .then(result => sendResponse(result))
+      .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+
+  // Stop tab capture and close offscreen document
+  if (request.action === 'stopTabCapture') {
+    handleStopTabCapture()
+      .then(result => sendResponse(result))
+      .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
 });
+
+// Start tab capture via offscreen document
+async function handleStartTabCapture(tabId, deepgramKey) {
+  console.log('[Voxly BG] Starting tab capture for tab:', tabId);
+
+  // Get stream ID — from service worker, targetTabId only needs tabCapture permission
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  console.log('[Voxly BG] Got stream ID');
+
+  // Create offscreen document if needed
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT']
+  });
+  if (existingContexts.length === 0) {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['USER_MEDIA'],
+      justification: 'Tab audio capture for real-time transcription'
+    });
+    console.log('[Voxly BG] Created offscreen document');
+  }
+
+  // Send capture command to offscreen document
+  const response = await chrome.runtime.sendMessage({
+    target: 'offscreen',
+    action: 'startCapture',
+    streamId,
+    deepgramKey
+  });
+
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+
+  return { ok: true };
+}
+
+// Stop tab capture and clean up offscreen document
+async function handleStopTabCapture() {
+  console.log('[Voxly BG] Stopping tab capture');
+
+  // Send stop command to offscreen document and wait for final segments
+  let result = { segments: [] };
+  try {
+    result = await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'stopCapture'
+    });
+  } catch (e) {
+    console.warn('[Voxly BG] Stop capture message failed:', e.message);
+  }
+
+  // Close offscreen document
+  try {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
+    if (contexts.length > 0) {
+      await chrome.offscreen.closeDocument();
+      console.log('[Voxly BG] Closed offscreen document');
+    }
+  } catch (e) {
+    console.warn('[Voxly BG] Close offscreen doc failed:', e.message);
+  }
+
+  return result;
+}
 
 // Listen to alarms for cloud session refresh and sync retry
 chrome.alarms.onAlarm.addListener((alarm) => {
