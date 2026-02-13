@@ -602,6 +602,7 @@ async function startRealtimeSession(tabStream, micStream) {
 
   realtimeSocket.onmessage = (event) => {
     const data = JSON.parse(event.data);
+    console.log(`[Voxly] Deepgram message: type=${data.type}`, data.type !== 'Results' ? JSON.stringify(data).substring(0, 200) : '');
     if (data.type === 'Results') {
       const transcript = data.channel?.alternatives?.[0]?.transcript;
       if (transcript && data.is_final) {
