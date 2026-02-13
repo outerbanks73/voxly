@@ -622,8 +622,8 @@ async function startRealtimeSession(tabStream, micStream) {
     console.error('[Voxly] Deepgram WebSocket error:', e);
   };
 
-  realtimeSocket.onclose = () => {
-    console.log('[Voxly] Deepgram WebSocket closed');
+  realtimeSocket.onclose = (event) => {
+    console.log(`[Voxly] Deepgram WebSocket closed — code: ${event.code}, reason: "${event.reason}"`);
   };
 
   // Create AudioContext at 16kHz for PCM conversion

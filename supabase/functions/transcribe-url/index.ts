@@ -254,6 +254,57 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs}`
 }
 
+// --- Page Title Scraping (for platforms without oEmbed) ---
+
+async function tryFetchPageTitle(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      redirect: 'follow'
+    })
+    if (!response.ok) return null
+
+    // Read only first 50KB to avoid loading full page
+    const reader = response.body?.getReader()
+    if (!reader) return null
+    let html = ''
+    const decoder = new TextDecoder()
+    while (html.length < 50000) {
+      const { done, value } = await reader.read()
+      if (done) break
+      html += decoder.decode(value, { stream: true })
+    }
+    reader.cancel()
+
+    // Try og:title first (most reliable for social media)
+    const ogMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
+      || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i)
+    if (ogMatch?.[1]) {
+      console.log(`[cascade] Scraped og:title: ${ogMatch[1].substring(0, 80)}`)
+      return ogMatch[1]
+    }
+
+    // Fallback to <title> tag (skip if generic like "Instagram" or "TikTok")
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
+    if (titleMatch?.[1]) {
+      const title = titleMatch[1].trim()
+      const genericTitles = ['instagram', 'tiktok', 'twitter', 'x', 'facebook']
+      if (!genericTitles.includes(title.toLowerCase())) {
+        console.log(`[cascade] Scraped <title>: ${title.substring(0, 80)}`)
+        return title
+      }
+    }
+
+    return null
+  } catch (e) {
+    console.log(`[cascade] Page title scrape failed: ${e.message}`)
+    return null
+  }
+}
+
 // --- Quota ---
 
 async function checkQuota(sb: any, userId: string): Promise<boolean> {
@@ -413,10 +464,15 @@ Deno.serve(async (req) => {
       })
     }
 
+    // If no title from cascade, try scraping the page's og:title
+    if (!result.title) {
+      result.title = await tryFetchPageTitle(url)
+    }
+
     // Add cascade metadata to result
     const method = steps.find(s => s.includes(':success'))?.split(':')[0]
     result.metadata = { method, cascade_steps: steps }
-    console.log(`[cascade] SUCCESS: method=${method}, steps=${steps.join(' → ')}, segments=${result.segments?.length || 0}`)
+    console.log(`[cascade] SUCCESS: method=${method}, steps=${steps.join(' → ')}, segments=${result.segments?.length || 0}, title=${result.title?.substring(0, 50) || '(none)'}`)
 
     // Increment usage
     await incrementUsage(supabase, user.id)

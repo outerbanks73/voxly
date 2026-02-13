@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         comment: `Voxly realtime - ${user.id}`,
-        scopes: ['usage:write'],
+        scopes: ['usage:write', 'listen'],
         time_to_live_in_seconds: 300, // 5 minute TTL
         tags: ['voxly', 'realtime']
       })
