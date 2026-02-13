@@ -1,7 +1,7 @@
 // Voxly - Transcribe URL Edge Function
 // Transcribes URLs via a cost-optimized cascade:
-//   YouTube: YouTube captions (free) → Supadata → error
-//   Social (TikTok, Instagram, X, Facebook): Supadata → error
+//   YouTube: YouTube captions (free) → Supadata → Deepgram Nova-2 → error
+//   Social (TikTok, Instagram, X, Facebook): Supadata → Deepgram Nova-2 → error
 //   Direct media: Supadata → Deepgram Nova-2 → error
 // Flow: Validate JWT → check quota → cascade → normalize → increment usage → return
 
@@ -363,8 +363,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Step 3: Deepgram fallback (only for direct media URLs)
-    if (!result && platform === 'direct') {
+    // Step 3: Deepgram fallback (all platforms)
+    if (!result) {
       result = await tryDeepgramUrl(url)
       steps.push(result ? 'deepgram:success' : 'deepgram:failed')
     }
