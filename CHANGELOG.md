@@ -7,6 +7,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-02-13
+
+### Added
+- Microphone + tab audio mixing for real-time recording — both sides of calls are now transcribed
+- Tab title captured as recording title (e.g., "Google Meet - Project Standup")
+- URL transcription cascade: YouTube captions (free) → Supadata → Deepgram Nova-2
+- Deepgram Nova-2 as universal fallback for all URL transcription failures
+- Cascade metadata in transcription results (method used, steps attempted)
+
+### Changed
+- Record tab simplified to real-time only (removed "transcribe after recording" toggle)
+- Edge Function `transcribe-url` rewritten with cost-optimized cascade logic
+- Edge Functions deployed with `--no-verify-jwt` for ES256 token compatibility
+
+### Fixed
+- Blank transcript from real-time recording (missing start/end fields, race condition in stopRecording)
+- Empty Supadata responses no longer treated as successful transcription
+- Cascade error messages now match extension error handling for user-friendly display
+
 ## [2.0.1] - 2026-02-09
 
 ### Changed

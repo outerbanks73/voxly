@@ -480,8 +480,9 @@ The existing connection status indicator becomes mode-aware:
 - Local mode: Whisper model dropdown (tiny/base/small/medium/large) — same as v2.0
 
 **Real-time recording:**
-- Cloud/Custom mode: Hidden (not supported)
-- Local mode: Visible — same as v2.0
+- Always visible. Real-time is the only recording mode (standard "transcribe after recording" removed in v2.5.1).
+- Uses Deepgram Nova-2 WebSocket streaming via temporary scoped API keys (`realtime-token` Edge Function).
+- **Mic + tab audio mixing (v2.5.1):** Recording captures both the tab's audio output (other call participants) and the user's microphone. Both streams are mixed via Web Audio API (`AudioContext` → `GainNode` mixer → `ScriptProcessor` → PCM int16 → Deepgram WebSocket). If microphone access is denied, falls back to tab audio only. Chrome remembers the mic permission choice after first grant.
 
 **Progress display:**
 - Cloud/Custom: Indeterminate progress bar (single HTTP request, no percentage available)

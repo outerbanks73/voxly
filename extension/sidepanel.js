@@ -19,6 +19,7 @@ let realtimeSocket = null;
 let realtimeAudioContext = null;
 let realtimeProcessor = null;
 let realtimeSegments = [];
+let realtimeMicStream = null;
 
 // DOM Elements
 const statusBar = document.getElementById('statusBar');
@@ -523,12 +524,21 @@ async function startRecording() {
   isRealtimeMode = true;
 
   try {
-    const stream = await getTabAudioStream();
+    const tabStream = await getTabAudioStream();
+
+    // Request microphone for mixed recording (tab + mic)
+    let micStream = null;
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('[Voxly] Microphone access granted — recording tab + mic audio');
+    } catch (micErr) {
+      console.warn('[Voxly] Microphone access denied — recording tab audio only:', micErr.message);
+    }
 
     recordedChunks = [];
 
     // Real-time mode: stream to Deepgram WebSocket
-    await startRealtimeSession(stream);
+    await startRealtimeSession(tabStream, micStream);
 
     recordingStartTime = Date.now();
 
@@ -558,7 +568,7 @@ async function startRecording() {
 }
 
 // Start real-time transcription session via Deepgram WebSocket
-async function startRealtimeSession(stream) {
+async function startRealtimeSession(tabStream, micStream) {
   try {
     // Get temporary Deepgram key from Edge Function
     const { key } = await transcriptionService.getRealtimeToken();
@@ -599,9 +609,23 @@ async function startRealtimeSession(stream) {
       console.log('[Voxly] Deepgram WebSocket closed');
     };
 
-    // Create AudioContext at 16kHz and ScriptProcessorNode for PCM conversion
+    // Create AudioContext at 16kHz for PCM conversion
     realtimeAudioContext = new AudioContext({ sampleRate: 16000 });
-    const source = realtimeAudioContext.createMediaStreamSource(stream);
+
+    // Mix tab audio + microphone via a GainNode bus
+    const mixer = realtimeAudioContext.createGain();
+    mixer.gain.value = 1.0;
+
+    const tabSource = realtimeAudioContext.createMediaStreamSource(tabStream);
+    tabSource.connect(mixer);
+
+    if (micStream) {
+      realtimeMicStream = micStream;
+      const micSource = realtimeAudioContext.createMediaStreamSource(micStream);
+      micSource.connect(mixer);
+    }
+
+    // ScriptProcessor reads the mixed signal and sends PCM to Deepgram
     realtimeProcessor = realtimeAudioContext.createScriptProcessor(4096, 1, 1);
 
     realtimeProcessor.onaudioprocess = (e) => {
@@ -617,11 +641,13 @@ async function startRealtimeSession(stream) {
       }
     };
 
-    source.connect(realtimeProcessor);
+    mixer.connect(realtimeProcessor);
     realtimeProcessor.connect(realtimeAudioContext.destination);
 
-    // Also keep MediaRecorder for the full recording blob (standard stop path)
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    // Record the mixed stream for archival
+    const mixedDest = realtimeAudioContext.createMediaStreamDestination();
+    mixer.connect(mixedDest);
+    mediaRecorder = new MediaRecorder(mixedDest.stream, { mimeType: 'audio/webm' });
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) recordedChunks.push(e.data);
     };
@@ -669,6 +695,10 @@ async function stopRealtimeSession() {
   if (realtimeAudioContext) {
     realtimeAudioContext.close();
     realtimeAudioContext = null;
+  }
+  if (realtimeMicStream) {
+    realtimeMicStream.getTracks().forEach(track => track.stop());
+    realtimeMicStream = null;
   }
 
   // Signal end of audio to Deepgram
