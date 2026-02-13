@@ -687,12 +687,27 @@ async function stopRealtimeSession() {
       full_text: fullText,
       segments: realtimeSegments.map(s => ({
         timestamp: formatTime(Math.floor(s.start)),
-        text: s.text
-      }))
+        text: s.text,
+        start: s.start,
+        end: s.end
+      })),
+      speakers: [],
+      diarization_status: 'skipped'
     };
+
+    // Capture tab title for the recording name
+    let recordingTitle = 'Tab Recording';
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.title) {
+        // Clean up common suffixes like " - Google Chrome"
+        recordingTitle = tab.title.replace(/\s*[-–—]\s*Google Chrome$/, '').trim() || 'Tab Recording';
+      }
+    } catch (_e) { /* fall back to default */ }
 
     const rtDuration = recordingStartTime ? Math.floor((Date.now() - recordingStartTime) / 1000) : null;
     currentMetadata = {
+      title: recordingTitle,
       source: 'Tab Recording (Real-time)',
       source_type: 'recording',
       extraction_method: 'cloud',
@@ -723,13 +738,13 @@ function formatTime(seconds) {
 }
 
 // Stop recording
-function stopRecording() {
+async function stopRecording() {
   // Stop MediaRecorder first
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }
-  // Then stop the realtime WebSocket session
-  stopRealtimeSession();
+  // Then stop the realtime WebSocket session (must await for results to save)
+  await stopRealtimeSession();
 
   clearInterval(recordingTimer);
 
