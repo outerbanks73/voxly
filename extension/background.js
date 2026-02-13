@@ -98,24 +98,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleStartTabCapture(deepgramKey) {
   console.log('[Voxly BG] Starting capture via offscreen document');
 
-  let streamId;
-
-  // Try getting a fresh stream ID (Chrome 116+: works without activeTab if no targetTabId)
-  try {
-    streamId = await chrome.tabCapture.getMediaStreamId({});
-    console.log('[Voxly BG] Got fresh stream ID');
-  } catch (e) {
-    console.warn('[Voxly BG] Fresh stream ID failed:', e.message);
-    // Fall back to cached stream ID from when user clicked the icon
-    const { cachedStreamId } = await chrome.storage.local.get('cachedStreamId');
-    if (cachedStreamId) {
-      streamId = cachedStreamId;
-      await chrome.storage.local.remove('cachedStreamId');
-      console.log('[Voxly BG] Using cached stream ID');
-    } else {
-      throw new Error('Cannot access tab audio. Click the Voxly icon on the tab you want to record, then try again.');
-    }
+  // Use cached stream ID from icon click (created with valid activeTab grant).
+  // getMediaStreamId({}) without activeTab returns a stream that looks valid
+  // but delivers silent audio — so we must use the cached one.
+  const { cachedStreamId } = await chrome.storage.local.get('cachedStreamId');
+  if (!cachedStreamId) {
+    throw new Error('No tab audio access. Click the Voxly icon on the tab you want to record, then try again.');
   }
+  const streamId = cachedStreamId;
+  await chrome.storage.local.remove('cachedStreamId');
+  console.log('[Voxly BG] Using cached stream ID from icon click');
 
   // Create offscreen document if needed, and wait for it to load
   const existingContexts = await chrome.runtime.getContexts({
