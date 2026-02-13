@@ -56,9 +56,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // Tab capture: get stream ID and start offscreen document
+  // Start recording: create offscreen document and begin capture
   if (request.action === 'startTabCapture') {
-    handleStartTabCapture(request.tabId, request.deepgramKey)
+    handleStartTabCapture(request.deepgramKey)
       .then(result => sendResponse(result))
       .catch(e => sendResponse({ error: e.message }));
     return true;
@@ -73,15 +73,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Start tab capture via offscreen document
-async function handleStartTabCapture(tabId, deepgramKey) {
-  console.log('[Voxly BG] Starting tab capture for tab:', tabId);
-
-  // Get stream ID for the current active tab.
-  // Don't pass targetTabId — that requires activeTab invocation which expires.
-  // Without it, captures current active tab using just tabCapture permission (Chrome 116+).
-  const streamId = await chrome.tabCapture.getMediaStreamId({});
-  console.log('[Voxly BG] Got stream ID');
+// Start capture via offscreen document using getDisplayMedia
+// tabCapture.getMediaStreamId() requires activeTab invocation which expires
+// in side panels. getDisplayMedia in offscreen document shows Chrome's tab
+// picker and works without activeTab.
+async function handleStartTabCapture(deepgramKey) {
+  console.log('[Voxly BG] Starting capture via offscreen document');
 
   // Create offscreen document if needed
   const existingContexts = await chrome.runtime.getContexts({
@@ -90,17 +87,16 @@ async function handleStartTabCapture(tabId, deepgramKey) {
   if (existingContexts.length === 0) {
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
-      reasons: ['USER_MEDIA'],
+      reasons: ['DISPLAY_MEDIA'],
       justification: 'Tab audio capture for real-time transcription'
     });
     console.log('[Voxly BG] Created offscreen document');
   }
 
-  // Send capture command to offscreen document
+  // Send capture command — offscreen doc will call getDisplayMedia
   const response = await chrome.runtime.sendMessage({
     target: 'offscreen',
     action: 'startCapture',
-    streamId,
     deepgramKey
   });
 
