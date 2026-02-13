@@ -538,7 +538,14 @@ async function startRecording() {
     recordedChunks = [];
 
     // Real-time mode: stream to Deepgram WebSocket
-    await startRealtimeSession(tabStream, micStream);
+    try {
+      await startRealtimeSession(tabStream, micStream);
+    } catch (sessionErr) {
+      // Clean up streams if session fails
+      tabStream.getTracks().forEach(t => t.stop());
+      if (micStream) micStream.getTracks().forEach(t => t.stop());
+      throw new Error(`Real-time session failed: ${sessionErr.message}`);
+    }
 
     recordingStartTime = Date.now();
 
@@ -569,93 +576,112 @@ async function startRecording() {
 
 // Start real-time transcription session via Deepgram WebSocket
 async function startRealtimeSession(tabStream, micStream) {
-  try {
-    // Get temporary Deepgram key from Edge Function
-    const { key } = await transcriptionService.getRealtimeToken();
+  // Get temporary Deepgram key from Edge Function
+  const { key } = await transcriptionService.getRealtimeToken();
+  console.log('[Voxly] Got realtime token');
 
-    // Open WebSocket to Deepgram
-    const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=16000`;
-    realtimeSocket = new WebSocket(wsUrl, ['token', key]);
+  // Open WebSocket to Deepgram and wait for it to connect
+  const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true&encoding=linear16&sample_rate=16000`;
+  realtimeSocket = new WebSocket(wsUrl, ['token', key]);
 
-    realtimeSegments = [];
+  realtimeSegments = [];
 
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Deepgram WebSocket connection timed out')), 10000);
     realtimeSocket.onopen = () => {
+      clearTimeout(timeout);
       console.log('[Voxly] Deepgram WebSocket connected');
+      resolve();
     };
-
-    realtimeSocket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'Results') {
-        const transcript = data.channel?.alternatives?.[0]?.transcript;
-        if (transcript && data.is_final) {
-          realtimeSegments.push({
-            text: transcript,
-            start: data.start,
-            end: data.start + data.duration
-          });
-          updateRealtimeTranscript(realtimeSegments);
-        } else if (transcript) {
-          // Interim result — show it as pending
-          updateRealtimeTranscriptInterim(transcript);
-        }
-      }
-    };
-
     realtimeSocket.onerror = (e) => {
+      clearTimeout(timeout);
       console.error('[Voxly] Deepgram WebSocket error:', e);
+      reject(new Error('Deepgram WebSocket connection failed'));
     };
+  });
 
-    realtimeSocket.onclose = () => {
-      console.log('[Voxly] Deepgram WebSocket closed');
-    };
-
-    // Create AudioContext at 16kHz for PCM conversion
-    realtimeAudioContext = new AudioContext({ sampleRate: 16000 });
-
-    // Mix tab audio + microphone via a GainNode bus
-    const mixer = realtimeAudioContext.createGain();
-    mixer.gain.value = 1.0;
-
-    const tabSource = realtimeAudioContext.createMediaStreamSource(tabStream);
-    tabSource.connect(mixer);
-
-    if (micStream) {
-      realtimeMicStream = micStream;
-      const micSource = realtimeAudioContext.createMediaStreamSource(micStream);
-      micSource.connect(mixer);
-    }
-
-    // ScriptProcessor reads the mixed signal and sends PCM to Deepgram
-    realtimeProcessor = realtimeAudioContext.createScriptProcessor(4096, 1, 1);
-
-    realtimeProcessor.onaudioprocess = (e) => {
-      if (realtimeSocket?.readyState === WebSocket.OPEN) {
-        const float32 = e.inputBuffer.getChannelData(0);
-        // Convert float32 to int16 PCM
-        const int16 = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
-          const s = Math.max(-1, Math.min(1, float32[i]));
-          int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
-        realtimeSocket.send(int16.buffer);
+  realtimeSocket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'Results') {
+      const transcript = data.channel?.alternatives?.[0]?.transcript;
+      if (transcript && data.is_final) {
+        realtimeSegments.push({
+          text: transcript,
+          start: data.start,
+          end: data.start + data.duration
+        });
+        updateRealtimeTranscript(realtimeSegments);
+      } else if (transcript) {
+        // Interim result — show it as pending
+        updateRealtimeTranscriptInterim(transcript);
       }
-    };
+    }
+  };
 
-    mixer.connect(realtimeProcessor);
-    realtimeProcessor.connect(realtimeAudioContext.destination);
+  realtimeSocket.onerror = (e) => {
+    console.error('[Voxly] Deepgram WebSocket error:', e);
+  };
 
-    // Record the mixed stream for archival
-    const mixedDest = realtimeAudioContext.createMediaStreamDestination();
-    mixer.connect(mixedDest);
-    mediaRecorder = new MediaRecorder(mixedDest.stream, { mimeType: 'audio/webm' });
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) recordedChunks.push(e.data);
-    };
-    mediaRecorder.start(1000);
+  realtimeSocket.onclose = () => {
+    console.log('[Voxly] Deepgram WebSocket closed');
+  };
 
-  } catch (e) {
-    showError(`Real-time session failed: ${e.message}`);
+  // Create AudioContext at 16kHz for PCM conversion
+  realtimeAudioContext = new AudioContext({ sampleRate: 16000 });
+  // Resume AudioContext — may be suspended after the tab-share picker dialog
+  if (realtimeAudioContext.state === 'suspended') {
+    console.log('[Voxly] AudioContext suspended, resuming...');
+    await realtimeAudioContext.resume();
   }
+  console.log('[Voxly] AudioContext state:', realtimeAudioContext.state);
+
+  // Mix tab audio + microphone via a GainNode bus
+  const mixer = realtimeAudioContext.createGain();
+  mixer.gain.value = 1.0;
+
+  const tabSource = realtimeAudioContext.createMediaStreamSource(tabStream);
+  tabSource.connect(mixer);
+
+  if (micStream) {
+    realtimeMicStream = micStream;
+    const micSource = realtimeAudioContext.createMediaStreamSource(micStream);
+    micSource.connect(mixer);
+  }
+
+  // ScriptProcessor reads the mixed signal and sends PCM to Deepgram
+  realtimeProcessor = realtimeAudioContext.createScriptProcessor(4096, 1, 1);
+
+  let audioFramesSent = 0;
+  realtimeProcessor.onaudioprocess = (e) => {
+    if (realtimeSocket?.readyState === WebSocket.OPEN) {
+      const float32 = e.inputBuffer.getChannelData(0);
+      // Convert float32 to int16 PCM
+      const int16 = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      realtimeSocket.send(int16.buffer);
+      audioFramesSent++;
+      if (audioFramesSent === 1) {
+        console.log('[Voxly] First audio frame sent to Deepgram');
+      } else if (audioFramesSent % 100 === 0) {
+        console.log(`[Voxly] Audio frames sent: ${audioFramesSent}`);
+      }
+    }
+  };
+
+  mixer.connect(realtimeProcessor);
+  realtimeProcessor.connect(realtimeAudioContext.destination);
+
+  // Record the mixed stream for archival
+  const mixedDest = realtimeAudioContext.createMediaStreamDestination();
+  mixer.connect(mixedDest);
+  mediaRecorder = new MediaRecorder(mixedDest.stream, { mimeType: 'audio/webm' });
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.start(1000);
 }
 
 // Update real-time transcript display with final segments
@@ -711,6 +737,10 @@ async function stopRealtimeSession() {
   realtimeSocket = null;
 
   // Assemble final result from accumulated segments
+  console.log(`[Voxly] Recording stopped — ${realtimeSegments.length} segments captured`);
+  if (realtimeSegments.length === 0) {
+    showError('No speech detected during recording. Make sure the tab is playing audio and try again.');
+  }
   if (realtimeSegments.length > 0) {
     const fullText = realtimeSegments.map(s => s.text).join(' ');
     currentResult = {
