@@ -77,8 +77,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleStartTabCapture(tabId, deepgramKey) {
   console.log('[Voxly BG] Starting tab capture for tab:', tabId);
 
-  // Get stream ID — from service worker, targetTabId only needs tabCapture permission
-  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+  // Get stream ID for the current active tab.
+  // Don't pass targetTabId — that requires activeTab invocation which expires.
+  // Without it, captures current active tab using just tabCapture permission (Chrome 116+).
+  const streamId = await chrome.tabCapture.getMediaStreamId({});
   console.log('[Voxly BG] Got stream ID');
 
   // Create offscreen document if needed
