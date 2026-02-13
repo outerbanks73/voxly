@@ -753,6 +753,21 @@ function hideResult() {
 }
 
 // Auto-populate URL field with current tab URL
+// Patterns for live meeting/streaming sites where Record tab is more appropriate
+const LIVE_RECORDING_SITES = [
+  'meet.google.com',
+  'zoom.us',
+  'teams.microsoft.com',
+  'teams.live.com',
+  'webex.com',
+  'discord.com/channels',
+  'slack.com/huddle',
+  'whereby.com',
+  'around.co',
+  'gather.town',
+  'twitch.tv'
+];
+
 async function autoPopulateUrl() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -762,6 +777,15 @@ async function autoPopulateUrl() {
     if (tab.url.startsWith('chrome://') || tab.url.startsWith('about:') || tab.url.startsWith('chrome-extension://')) {
       hideVideoTitle();
       return;
+    }
+
+    // Auto-switch to Record tab for live meeting/streaming sites
+    const isLiveSite = LIVE_RECORDING_SITES.some(site => tab.url.includes(site));
+    if (isLiveSite) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector('.tab[data-tab="record"]').classList.add('active');
+      document.getElementById('tab-record').classList.add('active');
     }
 
     // Always populate the URL field with the current tab

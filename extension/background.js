@@ -86,21 +86,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Start capture using cached stream ID from icon click.
-// activeTab is granted when the user clicks the extension icon — we cache the
-// stream ID then. The offscreen document uses it with getUserMedia.
+// Start capture using tab capture stream ID.
+// Strategy: try fresh getMediaStreamId() first (Chrome 116+ doesn't need activeTab
+// without targetTabId). Fall back to cached stream ID from icon click.
 async function handleStartTabCapture(deepgramKey) {
   console.log('[Voxly BG] Starting capture via offscreen document');
 
-  // Get cached stream ID from when user clicked the extension icon
-  const { cachedStreamId } = await chrome.storage.local.get('cachedStreamId');
-  if (!cachedStreamId) {
-    throw new Error('No tab audio access. Click the Voxly icon on the tab you want to record, then try again.');
-  }
+  let streamId;
 
-  // Clear it — stream IDs are single-use
-  await chrome.storage.local.remove('cachedStreamId');
-  console.log('[Voxly BG] Using cached stream ID');
+  // Try getting a fresh stream ID (Chrome 116+: works without activeTab if no targetTabId)
+  try {
+    streamId = await chrome.tabCapture.getMediaStreamId({});
+    console.log('[Voxly BG] Got fresh stream ID');
+  } catch (e) {
+    console.warn('[Voxly BG] Fresh stream ID failed:', e.message);
+    // Fall back to cached stream ID from when user clicked the icon
+    const { cachedStreamId } = await chrome.storage.local.get('cachedStreamId');
+    if (cachedStreamId) {
+      streamId = cachedStreamId;
+      await chrome.storage.local.remove('cachedStreamId');
+      console.log('[Voxly BG] Using cached stream ID');
+    } else {
+      throw new Error('Cannot access tab audio. Click the Voxly icon on the tab you want to record, then try again.');
+    }
+  }
 
   // Create offscreen document if needed, and wait for it to load
   const existingContexts = await chrome.runtime.getContexts({
@@ -132,7 +141,7 @@ async function handleStartTabCapture(deepgramKey) {
   const response = await chrome.runtime.sendMessage({
     target: 'offscreen',
     action: 'startCapture',
-    streamId: cachedStreamId,
+    streamId,
     deepgramKey
   });
 
