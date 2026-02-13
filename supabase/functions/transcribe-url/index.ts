@@ -403,8 +403,9 @@ Deno.serve(async (req) => {
 
     // All cascade steps failed
     if (!result) {
+      console.log(`[cascade] FAILED: all methods exhausted, steps=${steps.join(' → ')}`)
       return new Response(JSON.stringify({
-        error: 'Transcription failed — all methods exhausted',
+        error: `Supadata error: transcription failed for this URL (cascade: ${steps.join(' → ')})`,
         cascade_steps: steps
       }), {
         status: 502,
