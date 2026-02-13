@@ -520,39 +520,15 @@ async function getTabAudioStream() {
 
 // Start recording tab audio
 async function startRecording() {
-  const mode = document.getElementById('recordingMode').value;
-  isRealtimeMode = (mode === 'realtime');
+  isRealtimeMode = true;
 
   try {
     const stream = await getTabAudioStream();
 
     recordedChunks = [];
 
-    if (isRealtimeMode) {
-      // Real-time mode: stream to Deepgram WebSocket
-      await startRealtimeSession(stream);
-    } else {
-      // Standard mode: record everything, transcribe at end
-      const recorderMime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
-        : MediaRecorder.isTypeSupported('audio/ogg') ? 'audio/ogg'
-        : undefined;
-      mediaRecorder = new MediaRecorder(stream, recorderMime ? { mimeType: recorderMime } : {});
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          recordedChunks.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
-        const actualMime = mediaRecorder.mimeType || 'audio/webm';
-        const blob = new Blob(recordedChunks, { type: actualMime });
-        await transcribeRecording(blob);
-      };
-
-      mediaRecorder.start(1000);
-    }
+    // Real-time mode: stream to Deepgram WebSocket
+    await startRealtimeSession(stream);
 
     recordingStartTime = Date.now();
 
@@ -561,10 +537,8 @@ async function startRecording() {
     document.getElementById('stopRecordBtn').style.display = 'block';
     document.getElementById('recordingIndicator').classList.add('active');
 
-    if (isRealtimeMode) {
-      document.getElementById('realtimeTranscript').style.display = 'block';
-      document.getElementById('realtimeTranscript').innerHTML = '<em style="color: #999;">Listening...</em>';
-    }
+    document.getElementById('realtimeTranscript').style.display = 'block';
+    document.getElementById('realtimeTranscript').innerHTML = '<em style="color: #999;">Listening...</em>';
 
     // Start timer
     recordingTimer = setInterval(() => {
@@ -750,18 +724,12 @@ function formatTime(seconds) {
 
 // Stop recording
 function stopRecording() {
-  if (isRealtimeMode) {
-    // Stop MediaRecorder first
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
-    // Then stop the realtime WebSocket session
-    stopRealtimeSession();
-  } else {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
+  // Stop MediaRecorder first
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
   }
+  // Then stop the realtime WebSocket session
+  stopRealtimeSession();
 
   clearInterval(recordingTimer);
 
