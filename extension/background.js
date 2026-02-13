@@ -80,17 +80,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleStartTabCapture(deepgramKey) {
   console.log('[Voxly BG] Starting capture via offscreen document');
 
-  // Create offscreen document if needed
+  // Create offscreen document if needed, and wait for it to load
   const existingContexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT']
   });
   if (existingContexts.length === 0) {
+    // Set up listener for ready signal BEFORE creating the document
+    const readyPromise = new Promise((resolve) => {
+      const onReady = (msg) => {
+        if (msg.action === 'offscreenReady') {
+          chrome.runtime.onMessage.removeListener(onReady);
+          resolve();
+        }
+      };
+      chrome.runtime.onMessage.addListener(onReady);
+      // Fallback timeout in case ready signal is missed
+      setTimeout(resolve, 3000);
+    });
+
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['DISPLAY_MEDIA'],
       justification: 'Tab audio capture for real-time transcription'
     });
-    console.log('[Voxly BG] Created offscreen document');
+    console.log('[Voxly BG] Created offscreen document, waiting for ready...');
+    await readyPromise;
+    console.log('[Voxly BG] Offscreen document ready');
   }
 
   // Send capture command — offscreen doc will call getDisplayMedia
@@ -100,7 +115,12 @@ async function handleStartTabCapture(deepgramKey) {
     deepgramKey
   });
 
-  if (response?.error) {
+  console.log('[Voxly BG] Offscreen startCapture response:', JSON.stringify(response));
+
+  if (!response) {
+    throw new Error('Offscreen document did not respond. Please try again.');
+  }
+  if (response.error) {
     throw new Error(response.error);
   }
 

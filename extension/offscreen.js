@@ -11,6 +11,9 @@ let socket = null;
 let segments = [];
 let tabStream = null;
 
+// Signal to background that we're loaded and ready to receive messages
+chrome.runtime.sendMessage({ action: 'offscreenReady' });
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== 'offscreen') return;
 
