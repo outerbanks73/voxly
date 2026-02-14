@@ -1,7 +1,8 @@
 // Voxly - Offscreen Audio Capture
-// Captures tab audio via MediaRecorder and streams WebM/Opus chunks to
-// Deepgram WebSocket. Requests both audio+video from tabCapture (required
-// by Chrome on macOS for audio to flow), then records audio-only.
+// Two-phase design matching Chrome's official tabcapture-recorder sample:
+//   Phase 1 (captureTab): getUserMedia immediately on icon click while stream ID is fresh
+//   Phase 2 (startRecording): connect to Deepgram + start MediaRecorder when user clicks Record
+// Requests both audio+video from tabCapture (Chrome requires both for audio on macOS).
 // Routes captured audio back to speakers so the user can still hear the tab.
 
 const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
@@ -10,7 +11,8 @@ let mediaRecorder = null;
 let socket = null;
 let segments = [];
 let tabStream = null;
-let outputAudioContext = null; // Routes tab audio back to speakers
+let outputAudioContext = null;
+let outputSource = null; // Prevent GC of audio routing node
 
 // Relay logs to background/sidepanel console
 function log(msg) {
@@ -24,28 +26,49 @@ chrome.runtime.sendMessage({ action: 'offscreenReady' });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== 'offscreen') return;
 
-  if (message.action === 'startCapture') {
-    startCapture(message.streamId, message.deepgramKey)
+  if (message.action === 'captureTab') {
+    captureTab(message.streamId)
       .then(() => sendResponse({ ok: true }))
       .catch(e => {
-        log('[Voxly Offscreen] startCapture ERROR: ' + e.message);
+        log('[Voxly Offscreen] captureTab ERROR: ' + e.message);
         sendResponse({ error: e.message });
       });
     return true;
   }
 
-  if (message.action === 'stopCapture') {
-    stopCapture().then(result => {
+  if (message.action === 'startRecording') {
+    startRecording(message.deepgramKey)
+      .then(() => sendResponse({ ok: true }))
+      .catch(e => {
+        log('[Voxly Offscreen] startRecording ERROR: ' + e.message);
+        sendResponse({ error: e.message });
+      });
+    return true;
+  }
+
+  if (message.action === 'stopRecording') {
+    stopRecording().then(result => {
       sendResponse(result);
     });
     return true;
   }
 });
 
-async function startCapture(streamId, deepgramKey) {
-  // Request BOTH audio and video from tabCapture stream.
-  // Chrome on macOS can return a valid-looking but silent audio-only stream;
-  // including video constraints forces the full capture pipeline to activate.
+// Phase 1: Capture tab stream immediately (called on icon click, stream ID is fresh)
+async function captureTab(streamId) {
+  // Release any previous capture
+  if (tabStream) {
+    tabStream.getTracks().forEach(t => t.stop());
+    tabStream = null;
+  }
+  if (outputAudioContext) {
+    outputAudioContext.close().catch(() => {});
+    outputAudioContext = null;
+    outputSource = null;
+  }
+
+  // Request BOTH audio and video — audio-only getUserMedia can return a valid-looking
+  // but silent stream on Chrome/macOS. Every official Chrome sample includes video.
   // See: https://developer.chrome.com/docs/extensions/how-to/web-platform/screen-capture
   tabStream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -63,19 +86,29 @@ async function startCapture(streamId, deepgramKey) {
   });
   const audioTracks = tabStream.getAudioTracks();
   const videoTracks = tabStream.getVideoTracks();
-  log(`[Voxly Offscreen] Got stream — ${audioTracks.length} audio, ${videoTracks.length} video tracks, audio enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
+  log(`[Voxly Offscreen] Captured tab — ${audioTracks.length} audio, ${videoTracks.length} video, enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
 
   // Route captured audio back to speakers — getUserMedia with chromeMediaSource:'tab'
   // mutes the tab by default (Chromium issue #40885587). This restores playback.
   outputAudioContext = new AudioContext();
-  const source = outputAudioContext.createMediaStreamSource(tabStream);
-  source.connect(outputAudioContext.destination);
-  log(`[Voxly Offscreen] Audio routed to speakers (AudioContext state=${outputAudioContext.state})`);
+  outputSource = outputAudioContext.createMediaStreamSource(tabStream);
+  outputSource.connect(outputAudioContext.destination);
+  log(`[Voxly Offscreen] Audio routed to speakers (state=${outputAudioContext.state})`);
+}
 
-  // Create audio-only stream for Deepgram (we don't need the video)
+// Phase 2: Start streaming to Deepgram (called when user clicks Start Recording)
+async function startRecording(deepgramKey) {
+  if (!tabStream || tabStream.getAudioTracks().length === 0) {
+    throw new Error('No tab audio captured. Click the Voxly icon on the tab you want to record, then try again.');
+  }
+
+  const audioTracks = tabStream.getAudioTracks();
+  log(`[Voxly Offscreen] Starting recording — audio track enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
+
+  // Create audio-only stream for Deepgram (we don't need video)
   const audioOnlyStream = new MediaStream(audioTracks);
 
-  // Connect to Deepgram WebSocket — no encoding params, Deepgram auto-detects WebM/Opus
+  // Connect to Deepgram WebSocket
   const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true`;
   socket = new WebSocket(wsUrl, ['token', deepgramKey]);
   segments = [];
@@ -154,7 +187,8 @@ async function startCapture(streamId, deepgramKey) {
   log('[Voxly Offscreen] MediaRecorder started — streaming to Deepgram');
 }
 
-async function stopCapture() {
+// Stop recording and release all resources
+async function stopRecording() {
   // Stop MediaRecorder
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
@@ -167,6 +201,7 @@ async function stopCapture() {
   if (outputAudioContext) {
     outputAudioContext.close().catch(() => {});
     outputAudioContext = null;
+    outputSource = null;
   }
 
   // Stop all tracks (audio + video)
@@ -183,7 +218,7 @@ async function stopCapture() {
   }
   socket = null;
 
-  log(`[Voxly Offscreen] Capture stopped — ${segments.length} segments`);
+  log(`[Voxly Offscreen] Recording stopped — ${segments.length} segments`);
 
   const result = { segments: [...segments] };
   segments = [];
