@@ -49,6 +49,24 @@ chrome.action.onClicked.addListener(async (tab) => {
   // Open side panel immediately for responsive UX
   chrome.sidePanel.open({ tabId: tab.id });
 
+  // Pre-create offscreen document so it's ready when user clicks Start Recording.
+  // This minimizes delay between stream ID creation and consumption (IDs can expire).
+  try {
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
+    if (existingContexts.length === 0) {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['USER_MEDIA'],
+        justification: 'Tab audio capture for real-time transcription'
+      });
+      console.log('[Voxly BG] Pre-created offscreen document');
+    }
+  } catch (e) {
+    console.warn('[Voxly BG] Could not pre-create offscreen doc:', e.message);
+  }
+
   // Cache stream ID while activeTab is fresh (granted by icon click)
   try {
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });

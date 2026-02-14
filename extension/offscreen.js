@@ -1,8 +1,8 @@
 // Voxly - Offscreen Audio Capture
 // Captures tab audio via MediaRecorder and streams WebM/Opus chunks to
-// Deepgram WebSocket. Uses MediaRecorder instead of Web Audio API
-// (ScriptProcessor/AudioWorklet) to avoid audio routing issues in
-// offscreen documents.
+// Deepgram WebSocket. Requests both audio+video from tabCapture (required
+// by Chrome on macOS for audio to flow), then records audio-only.
+// Routes captured audio back to speakers so the user can still hear the tab.
 
 const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
 
@@ -10,6 +10,7 @@ let mediaRecorder = null;
 let socket = null;
 let segments = [];
 let tabStream = null;
+let outputAudioContext = null; // Routes tab audio back to speakers
 
 // Relay logs to background/sidepanel console
 function log(msg) {
@@ -42,9 +43,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function startCapture(streamId, deepgramKey) {
-  // Get tab audio stream using stream ID from background
+  // Request BOTH audio and video from tabCapture stream.
+  // Chrome on macOS can return a valid-looking but silent audio-only stream;
+  // including video constraints forces the full capture pipeline to activate.
+  // See: https://developer.chrome.com/docs/extensions/how-to/web-platform/screen-capture
   tabStream = await navigator.mediaDevices.getUserMedia({
     audio: {
+      mandatory: {
+        chromeMediaSource: 'tab',
+        chromeMediaSourceId: streamId
+      }
+    },
+    video: {
       mandatory: {
         chromeMediaSource: 'tab',
         chromeMediaSourceId: streamId
@@ -52,7 +62,18 @@ async function startCapture(streamId, deepgramKey) {
     }
   });
   const audioTracks = tabStream.getAudioTracks();
-  log(`[Voxly Offscreen] Got stream — ${audioTracks.length} audio tracks, enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
+  const videoTracks = tabStream.getVideoTracks();
+  log(`[Voxly Offscreen] Got stream — ${audioTracks.length} audio, ${videoTracks.length} video tracks, audio enabled=${audioTracks[0]?.enabled}, readyState=${audioTracks[0]?.readyState}`);
+
+  // Route captured audio back to speakers — getUserMedia with chromeMediaSource:'tab'
+  // mutes the tab by default (Chromium issue #40885587). This restores playback.
+  outputAudioContext = new AudioContext();
+  const source = outputAudioContext.createMediaStreamSource(tabStream);
+  source.connect(outputAudioContext.destination);
+  log(`[Voxly Offscreen] Audio routed to speakers (AudioContext state=${outputAudioContext.state})`);
+
+  // Create audio-only stream for Deepgram (we don't need the video)
+  const audioOnlyStream = new MediaStream(audioTracks);
 
   // Connect to Deepgram WebSocket — no encoding params, Deepgram auto-detects WebM/Opus
   const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true`;
@@ -107,14 +128,13 @@ async function startCapture(streamId, deepgramKey) {
   socket.onerror = () => log('[Voxly Offscreen] WebSocket error');
   socket.onclose = (event) => log(`[Voxly Offscreen] WebSocket closed — code=${event.code}`);
 
-  // Use MediaRecorder to capture audio — bypasses Web Audio API entirely.
-  // Sends WebM/Opus chunks directly to Deepgram every 250ms.
+  // MediaRecorder on audio-only stream — sends WebM/Opus chunks to Deepgram every 250ms
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : 'audio/webm';
   log(`[Voxly Offscreen] MediaRecorder mimeType: ${mimeType}`);
 
-  mediaRecorder = new MediaRecorder(tabStream, { mimeType });
+  mediaRecorder = new MediaRecorder(audioOnlyStream, { mimeType });
 
   let chunkCount = 0;
   mediaRecorder.ondataavailable = async (event) => {
@@ -143,6 +163,13 @@ async function stopCapture() {
   }
   mediaRecorder = null;
 
+  // Close audio output routing
+  if (outputAudioContext) {
+    outputAudioContext.close().catch(() => {});
+    outputAudioContext = null;
+  }
+
+  // Stop all tracks (audio + video)
   if (tabStream) {
     tabStream.getTracks().forEach(t => t.stop());
     tabStream = null;
