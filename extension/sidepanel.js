@@ -74,12 +74,25 @@ const STREAMING_SITES = [
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+  console.log('[Voxly] DOMContentLoaded — starting init');
+
   // Set up UI immediately — don't block on network calls
-  setupTabs();
-  setupFileUpload();
-  setupButtons();
-  setupUpgradeModal();
-  setupUrlTitlePreview();
+  try { setupTabs(); } catch (e) { console.error('[Voxly] setupTabs error:', e); }
+  try { setupFileUpload(); } catch (e) { console.error('[Voxly] setupFileUpload error:', e); }
+  try { setupButtons(); } catch (e) { console.error('[Voxly] setupButtons error:', e); }
+  try { setupUpgradeModal(); } catch (e) { console.error('[Voxly] setupUpgradeModal error:', e); }
+  try { setupUrlTitlePreview(); } catch (e) { console.error('[Voxly] setupUrlTitlePreview error:', e); }
+
+  console.log('[Voxly] UI setup complete, starting auth check');
+
+  // Fail-safe: if status bar still shows default text after 6s, force it to show sign-in link
+  setTimeout(() => {
+    if (statusText && statusText.textContent === 'Checking cloud status...') {
+      console.log('[Voxly] Auth check timed out — forcing sign-in link');
+      statusBar.className = 'status-bar disconnected';
+      statusText.innerHTML = 'Sign in required. <a href="options.html" target="_blank" style="color:inherit;text-decoration:underline;">Click here</a>';
+    }
+  }, 6000);
 
   // Auth and network checks run in parallel — UI is already functional
   checkCloudStatusAndUpdateUI();
