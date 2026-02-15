@@ -13,6 +13,12 @@ let isRealtimeMode = false;
 let detectedVideoTitle = null;
 let realtimeSegments = [];
 
+// Recording state (getDisplayMedia capture runs directly in side panel)
+const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
+let recordingStream = null;
+let recordingSocket = null;
+let recordingMediaRecorder = null;
+
 // DOM Elements
 const statusBar = document.getElementById('statusBar');
 const statusText = document.getElementById('statusText');
@@ -483,38 +489,108 @@ async function transcribeUrl(url) {
   }
 }
 
-// Start recording tab audio via offscreen document
-// Audio capture happens in an offscreen document because Chrome side panels
-// cannot properly receive tab audio (getDisplayMedia delivers silence).
+// Start recording using getDisplayMedia directly in the side panel.
+// This bypasses chrome.tabCapture (which delivers silence on some macOS systems)
+// and uses Chrome's standard screen sharing pipeline instead.
 async function startRecording() {
   isRealtimeMode = true;
 
   try {
-    // Get the active tab
+    // Get the active tab for logging
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id) {
-      throw new Error('No active tab found. Navigate to the tab you want to record.');
-    }
-    if (activeTab.url?.startsWith('chrome://') || activeTab.url?.startsWith('chrome-extension://')) {
-      throw new Error('Cannot record Chrome internal pages. Navigate to the tab you want to record (e.g., Google Meet).');
-    }
+    console.log('[Voxly] Starting recording for tab:', activeTab?.title?.substring(0, 50));
 
-    console.log('[Voxly] Starting recording for tab:', activeTab.title?.substring(0, 50));
-
-    // Get temporary Deepgram key
+    // Get temporary Deepgram key first (before showing picker)
     const { key } = await transcriptionService.getRealtimeToken();
     console.log('[Voxly] Got realtime token');
 
-    // Start tab capture via background SW → offscreen document
-    const response = await chrome.runtime.sendMessage({
-      action: 'startTabCapture',
-      tabId: activeTab.id,
-      deepgramKey: key
+    // Capture tab via getDisplayMedia — shows Chrome's share dialog.
+    // preferCurrentTab pre-selects the active tab for a simpler prompt.
+    recordingStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true,
+      preferCurrentTab: true
     });
 
-    if (response?.error) {
-      throw new Error(response.error);
+    const audioTracks = recordingStream.getAudioTracks();
+    const videoTracks = recordingStream.getVideoTracks();
+    console.log(`[Voxly] Got display media — ${audioTracks.length} audio, ${videoTracks.length} video tracks`);
+
+    if (audioTracks.length === 0) {
+      recordingStream.getTracks().forEach(t => t.stop());
+      recordingStream = null;
+      throw new Error('No audio track. Make sure "Share tab audio" is checked when sharing.');
     }
+
+    // Stop sharing if user ends it via Chrome's "Stop sharing" button
+    recordingStream.getVideoTracks()[0]?.addEventListener('ended', () => {
+      console.log('[Voxly] User stopped sharing');
+      if (isRealtimeMode) stopRecording();
+    });
+
+    // Create audio-only stream for Deepgram
+    const audioOnlyStream = new MediaStream(audioTracks);
+
+    // Connect to Deepgram WebSocket
+    const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true`;
+    recordingSocket = new WebSocket(wsUrl, ['token', key]);
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Deepgram WebSocket timed out')), 10000);
+      recordingSocket.onopen = () => {
+        clearTimeout(timeout);
+        console.log('[Voxly] Deepgram WebSocket connected');
+        resolve();
+      };
+      recordingSocket.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error('Deepgram WebSocket connection failed'));
+      };
+    });
+
+    // Handle Deepgram responses
+    recordingSocket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'Results') {
+        const transcript = data.channel?.alternatives?.[0]?.transcript || '';
+        if (transcript && data.is_final) {
+          const segment = {
+            text: transcript,
+            start: data.start,
+            end: data.start + data.duration
+          };
+          realtimeSegments.push(segment);
+          updateRealtimeTranscript(realtimeSegments);
+        } else if (transcript) {
+          updateRealtimeTranscriptInterim(transcript);
+        }
+      }
+    };
+
+    recordingSocket.onerror = () => console.log('[Voxly] Deepgram WebSocket error');
+    recordingSocket.onclose = (event) => console.log(`[Voxly] Deepgram WebSocket closed — code=${event.code}`);
+
+    // MediaRecorder sends WebM/Opus chunks to Deepgram every 250ms
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+
+    recordingMediaRecorder = new MediaRecorder(audioOnlyStream, { mimeType });
+
+    let chunkCount = 0;
+    recordingMediaRecorder.ondataavailable = async (event) => {
+      if (event.data.size > 0 && recordingSocket?.readyState === WebSocket.OPEN) {
+        const buffer = await event.data.arrayBuffer();
+        recordingSocket.send(buffer);
+        if (chunkCount < 5 || chunkCount % 20 === 0) {
+          console.log(`[Voxly] Chunk ${chunkCount}: ${buffer.byteLength} bytes`);
+        }
+        chunkCount++;
+      }
+    };
+
+    recordingMediaRecorder.start(250);
+    console.log('[Voxly] MediaRecorder started — streaming to Deepgram');
 
     realtimeSegments = [];
     recordingStartTime = Date.now();
@@ -536,7 +612,19 @@ async function startRecording() {
     }, 1000);
 
   } catch (e) {
-    if (e.message.includes('Permission denied') || e.message.includes('cancelled') || e.message.includes('AbortError')) {
+    // Clean up on failure
+    if (recordingStream) {
+      recordingStream.getTracks().forEach(t => t.stop());
+      recordingStream = null;
+    }
+    if (recordingSocket) {
+      recordingSocket.close();
+      recordingSocket = null;
+    }
+    recordingMediaRecorder = null;
+    isRealtimeMode = false;
+
+    if (e.message.includes('Permission denied') || e.message.includes('cancelled') || e.message.includes('AbortError') || e.name === 'NotAllowedError') {
       showError('Recording cancelled. Click Start Recording and select the tab to share.');
     } else {
       showError(`Recording failed: ${e.message}`);
@@ -647,14 +735,29 @@ async function stopRecording() {
   document.getElementById('stopRecordBtn').style.display = 'none';
   document.getElementById('recordingIndicator').classList.remove('active');
 
-  // Stop capture in offscreen document and get final segments
-  try {
-    const response = await chrome.runtime.sendMessage({ action: 'stopTabCapture' });
-    await processFinalRecording(response?.segments);
-  } catch (e) {
-    console.error('[Voxly] Stop recording error:', e);
-    await processFinalRecording(null);
+  // Stop MediaRecorder
+  if (recordingMediaRecorder && recordingMediaRecorder.state !== 'inactive') {
+    recordingMediaRecorder.stop();
+    await new Promise(resolve => setTimeout(resolve, 500)); // Wait for final chunk
   }
+  recordingMediaRecorder = null;
+
+  // Stop all tracks
+  if (recordingStream) {
+    recordingStream.getTracks().forEach(t => t.stop());
+    recordingStream = null;
+  }
+
+  // Close Deepgram WebSocket and wait for final results
+  if (recordingSocket?.readyState === WebSocket.OPEN) {
+    recordingSocket.send(new ArrayBuffer(0)); // Close signal
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    recordingSocket.close();
+  }
+  recordingSocket = null;
+
+  console.log(`[Voxly] Recording stopped — ${realtimeSegments.length} segments captured`);
+  await processFinalRecording(realtimeSegments.length > 0 ? realtimeSegments : null);
 
   isRealtimeMode = false;
 }

@@ -7,9 +7,6 @@
   "permissions": [
     "storage",
     "tabs",
-    "tabCapture",
-    "activeTab",
-    "offscreen",
     "alarms",
     "sidePanel"
   ],
