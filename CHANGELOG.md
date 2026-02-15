@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-02-14
+
+### Changed
+- Recording now uses microphone capture (getUserMedia) — reliable across all platforms
+- Simplified background service worker (removed offscreen document complexity)
+
+### Fixed
+- Sidepanel script crash caused by duplicate `DEEPGRAM_WS_URL` const declaration (config.js already defines it)
+- UI freeze when Supabase auth check hangs — initialization no longer blocks on network calls
+- Auth check has 5-second timeout with fail-safe fallback
+
 ## [2.5.1] - 2026-02-13
 
 ### Added

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Voxly - Instant Transcripts",
   "short_name": "Voxly",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "description": "Transform audio & video into AI-ready transcripts. Cloud-powered transcription with Deepgram Nova-2. Export to JSON, Markdown, SRT.",
   "permissions": [
     "storage",
