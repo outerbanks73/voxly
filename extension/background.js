@@ -32,14 +32,19 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.tabs.create({ url: 'options.html' });
   }
 
-  // Open side panel when user clicks the extension icon
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // Don't auto-open panel on click — we handle it in onClicked
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
 
   // Set up cloud session refresh alarm (every 55 min, tokens expire at 60)
   chrome.alarms.create('refreshCloudSession', { periodInMinutes: 55 });
 
   // Set up cloud sync retry alarm (every 5 min for offline queue)
   chrome.alarms.create('retrySyncQueue', { periodInMinutes: 5 });
+});
+
+// When user clicks the extension icon: open side panel
+chrome.action.onClicked.addListener(async (tab) => {
+  chrome.sidePanel.open({ tabId: tab.id });
 });
 
 // Handle messages
