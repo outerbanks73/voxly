@@ -257,7 +257,11 @@ function showUpgradeModal() {
 async function checkCloudStatusAndUpdateUI() {
   const signInLink = 'Sign in required. <a href="options.html" target="_blank" style="color:inherit;text-decoration:underline;">Click here</a>';
   try {
-    const authenticated = await isCloudAuthenticated();
+    // Timeout after 5s to prevent hanging forever if Supabase is unreachable
+    const authenticated = await Promise.race([
+      isCloudAuthenticated(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Auth check timed out')), 5000))
+    ]);
     if (authenticated) {
       statusBar.className = 'status-bar connected';
       statusText.textContent = 'Cloud ready';
@@ -267,6 +271,7 @@ async function checkCloudStatusAndUpdateUI() {
     }
     return authenticated;
   } catch (e) {
+    console.log('[Voxly] Cloud status check failed:', e.message);
     statusBar.className = 'status-bar disconnected';
     statusText.innerHTML = signInLink;
     return false;
@@ -492,47 +497,25 @@ async function transcribeUrl(url) {
   }
 }
 
-// Start recording using getDisplayMedia directly in the side panel.
-// This bypasses chrome.tabCapture (which delivers silence on some macOS systems)
-// and uses Chrome's standard screen sharing pipeline instead.
+// Start recording from microphone and stream to Deepgram for real-time transcription.
+// Uses getUserMedia (microphone) — simple, reliable, no special Chrome permissions.
+// Captures your voice + whatever comes through speakers (good for meetings).
 async function startRecording() {
   isRealtimeMode = true;
 
   try {
-    // Get the active tab for logging
+    // Get the active tab for naming the recording
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    console.log('[Voxly] Starting recording for tab:', activeTab?.title?.substring(0, 50));
+    console.log('[Voxly] Starting mic recording for tab:', activeTab?.title?.substring(0, 50));
 
-    // Get temporary Deepgram key first (before showing picker)
+    // Get temporary Deepgram key
     const { key } = await transcriptionService.getRealtimeToken();
     console.log('[Voxly] Got realtime token');
 
-    // Capture tab via getDisplayMedia — shows Chrome's share dialog.
-    // preferCurrentTab pre-selects the active tab for a simpler prompt.
-    recordingStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true,
-      preferCurrentTab: true
-    });
-
+    // Capture microphone audio
+    recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const audioTracks = recordingStream.getAudioTracks();
-    const videoTracks = recordingStream.getVideoTracks();
-    console.log(`[Voxly] Got display media — ${audioTracks.length} audio, ${videoTracks.length} video tracks`);
-
-    if (audioTracks.length === 0) {
-      recordingStream.getTracks().forEach(t => t.stop());
-      recordingStream = null;
-      throw new Error('No audio track. Make sure "Share tab audio" is checked when sharing.');
-    }
-
-    // Stop sharing if user ends it via Chrome's "Stop sharing" button
-    recordingStream.getVideoTracks()[0]?.addEventListener('ended', () => {
-      console.log('[Voxly] User stopped sharing');
-      if (isRealtimeMode) stopRecording();
-    });
-
-    // Create audio-only stream for Deepgram
-    const audioOnlyStream = new MediaStream(audioTracks);
+    console.log(`[Voxly] Got mic stream — ${audioTracks.length} audio tracks, device: ${audioTracks[0]?.label}`);
 
     // Connect to Deepgram WebSocket
     const wsUrl = `${DEEPGRAM_WS_URL}?model=nova-2&interim_results=true&diarize=true`;
@@ -578,7 +561,7 @@ async function startRecording() {
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
 
-    recordingMediaRecorder = new MediaRecorder(audioOnlyStream, { mimeType });
+    recordingMediaRecorder = new MediaRecorder(recordingStream, { mimeType });
 
     let chunkCount = 0;
     recordingMediaRecorder.ondataavailable = async (event) => {
@@ -593,7 +576,7 @@ async function startRecording() {
     };
 
     recordingMediaRecorder.start(250);
-    console.log('[Voxly] MediaRecorder started — streaming to Deepgram');
+    console.log('[Voxly] MediaRecorder started — streaming mic audio to Deepgram');
 
     realtimeSegments = [];
     recordingStartTime = Date.now();
@@ -604,7 +587,7 @@ async function startRecording() {
     document.getElementById('recordingIndicator').classList.add('active');
 
     document.getElementById('realtimeTranscript').style.display = 'block';
-    document.getElementById('realtimeTranscript').innerHTML = '<em style="color: #999;">Listening...</em>';
+    document.getElementById('realtimeTranscript').innerHTML = '<em style="color: #999;">Listening via microphone...</em>';
 
     // Start timer
     recordingTimer = setInterval(() => {
@@ -627,8 +610,8 @@ async function startRecording() {
     recordingMediaRecorder = null;
     isRealtimeMode = false;
 
-    if (e.message.includes('Permission denied') || e.message.includes('cancelled') || e.message.includes('AbortError') || e.name === 'NotAllowedError') {
-      showError('Recording cancelled. Click Start Recording and select the tab to share.');
+    if (e.name === 'NotAllowedError' || e.message.includes('Permission denied')) {
+      showError('Microphone access denied. Allow microphone permission and try again.');
     } else {
       showError(`Recording failed: ${e.message}`);
     }
