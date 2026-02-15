@@ -13,8 +13,8 @@ let isRealtimeMode = false;
 let detectedVideoTitle = null;
 let realtimeSegments = [];
 
-// Recording state (getDisplayMedia capture runs directly in side panel)
-const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
+// Recording state (mic capture runs directly in side panel)
+// DEEPGRAM_WS_URL is defined in config.js (loaded before this script)
 let recordingStream = null;
 let recordingSocket = null;
 let recordingMediaRecorder = null;
