@@ -74,14 +74,17 @@ const STREAMING_SITES = [
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-  await checkCloudStatusAndUpdateUI();
+  // Set up UI immediately — don't block on network calls
   setupTabs();
   setupFileUpload();
   setupButtons();
   setupUpgradeModal();
   setupUrlTitlePreview();
-  await autoPopulateUrl();
-  await updateUsageIndicator();
+
+  // Auth and network checks run in parallel — UI is already functional
+  checkCloudStatusAndUpdateUI();
+  autoPopulateUrl();
+  updateUsageIndicator();
   checkForUpdates();
   updateLibraryLink(); // Show library link if cloud user
 
